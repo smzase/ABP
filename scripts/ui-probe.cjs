@@ -900,10 +900,14 @@ app.whenReady().then(async () => {
     if (e.level === 'error' || e.level === 3) errors.push(String(e.message).slice(0, 300))
   })
   win.setSize(1280, 860)
-  win.showInactive()
-  await wait(1500)
+  // Real pointer events need focus; background throttling can stall closing overlays.
+  win.webContents.setBackgroundThrottling(false)
+  win.show()
+  win.focus()
+  win.webContents.focus()
 
   try {
+    check('Probe window has input focus', await waitFor(win, 'document.hasFocus()'))
     await run(win)
   } catch (err) {
     check(`探针自身出错：${String(err).slice(0, 200)}`, false)

@@ -10,7 +10,7 @@ files:
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
   - '!docs/*'
   - '!{.workbuddy,.github,scripts,build}/**'
-  - '!{AGENTS.md,CLAUDE.md,README.md,eslint.config.js,components.json}'
+  - '!{AGENTS.md,CLAUDE.md,README.md,eslint.config.mjs,components.json}'
   - 'out/**'
   - 'package.json'
 asar: true
