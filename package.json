@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "AniBT Publish — AniBT 站点动画资源发布客户端（Windows / macOS / Linux）",
   "author": "smzase",
+  "homepage": "https://github.com/smzase/ABP",
   "license": "MIT",
   "private": true,
   "main": "out/main/index.js",

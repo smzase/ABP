@@ -1,36 +1,41 @@
-name: Release
+name: Build Artifacts
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     name: Build ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest, ubuntu-latest]
+        include:
+          - os: windows-2022
+            platform: win
+          - os: macos-15
+            platform: mac
+          - os: ubuntu-24.04
+            platform: linux
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '24'
           cache: npm
 
       # 全量依赖只用于构建，产物只含 out/ + package.json（见 electron-builder.yml files 白名单），
       # node_modules 不会进安装包。
-      - run: npm ci
+      - run: npm ci --no-audit --no-fund
 
       - run: npm run lint
-        continue-on-error: true
 
       - run: npm run typecheck
 
@@ -38,54 +43,30 @@ jobs:
 
       - run: npm run build
 
-      - name: Package (Windows: NSIS + 单文件 portable)
-        if: matrix.os == 'windows-latest'
-        run: npx electron-builder --win --publish never
+      # 当前真窗口探针与产物冒烟脚本使用 Windows 的配置目录和 exe 路径。
+      - name: Test Windows UI
+        if: runner.os == 'Windows'
+        run: npm run probe
 
-      - name: Package (macOS: dmg + zip)
-        if: matrix.os == 'macos-latest'
-        run: npx electron-builder --mac --publish never
+      # pack:* 脚本都显式带 --publish never，不创建或更新 GitHub Releases。
+      - name: Package ${{ matrix.platform }}
+        run: npm run pack:${{ matrix.platform }}
 
-      - name: Package (Linux: AppImage + deb)
-        if: matrix.os == 'ubuntu-latest'
-        run: npx electron-builder --linux --publish never
+      - name: Smoke test Windows artifact
+        if: runner.os == 'Windows'
+        run: npm run smoke
 
       # 只上传打包产物（exe / dmg / zip / AppImage / deb），不含任何源码或 node_modules
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: anibt-publish-${{ matrix.os }}
+          name: anibt-publish-${{ matrix.platform }}
           path: |
             release/*.exe
             release/*.dmg
             release/*.zip
             release/*.AppImage
             release/*.deb
-            release/*.blockmap
-            release/latest*.yml
           if-no-files-found: error
-
-  release:
-    name: Create GitHub Release
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: anibt-publish-*
-          merge-multiple: true
-
-      - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            *.exe
-            *.dmg
-            *.zip
-            *.AppImage
-            *.deb
-            *.blockmap
-            latest*.yml
-          generate_release_notes: true
+          compression-level: 0
+          retention-days: 14

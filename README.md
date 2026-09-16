@@ -55,8 +55,10 @@ npm run pack:linux    # Linux：AppImage + deb
 node scripts/smoke-test.mjs
 ```
 
-CI：打 `v*` tag 推送即可触发 GitHub Actions 三端构建并发布 Release
-（产物只有安装包，不含 node_modules）。
+CI：在 GitHub **Actions → Build Artifacts → Run workflow** 手动触发三端构建。
+通过检查和打包后，在该次运行页面的 **Artifacts** 下载 `anibt-publish-win`（NSIS + portable）、
+`anibt-publish-mac`（x64 / arm64 的 dmg + zip）或 `anibt-publish-linux`（AppImage + deb）。
+产物保留 14 天，只包含安装包，不含 node_modules；不会创建或更新 GitHub Releases，推送 tag 也不会自动运行。
 
 ## 文档
 
