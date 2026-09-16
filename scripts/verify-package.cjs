@@ -6,6 +6,10 @@ const asar = require('@electron/asar')
 
 module.exports = function verifyPackage(context) {
   const resourcesDir = context.packager.getResourcesDir(context.appOutDir)
+  if (context.electronPlatformName === 'win32' || context.electronPlatformName === 'linux') {
+    const locales = fs.readdirSync(path.join(context.appOutDir, 'locales')).filter(name => name.endsWith('.pak')).sort()
+    assert.deepEqual(locales, ['en-US.pak', 'zh-CN.pak', 'zh-TW.pak'], 'Electron should only contain supported locales')
+  }
   const archive = path.join(resourcesDir, 'app.asar')
   const entries = asar.listPackage(archive).map((entry) => entry.replace(/\\/g, '/').replace(/^\//, ''))
   const unexpected = entries.filter(

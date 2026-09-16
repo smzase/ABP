@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { defineAsyncComponent } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronDown, X, Loader2, CheckCircle2, XCircle, ExternalLink } from '@lucide/vue'
 import { RESOLUTIONS, VIDEO_FORMATS, SUBTITLE_TYPES } from '@shared/types.ts'
@@ -9,9 +10,10 @@ import UiSelect from '@renderer/components/ui/UiSelect.vue'
 import UiSelectItem from '@renderer/components/ui/UiSelectItem.vue'
 import UiTagInput from '@renderer/components/ui/UiTagInput.vue'
 import UiLabel from '@renderer/components/ui/UiLabel.vue'
-import UiMarkdownEditor from '@renderer/components/ui/UiMarkdownEditor.vue'
 import LanguageMultiSelect from '@renderer/components/LanguageMultiSelect.vue'
 import { cn } from '@renderer/lib/utils.ts'
+
+const UiMarkdownEditor = defineAsyncComponent(() => import('@renderer/components/ui/UiMarkdownEditor.vue'))
 
 /**
  * 阶段二行：标题 / 集数 / 字幕语言 / 展开 / 移除。

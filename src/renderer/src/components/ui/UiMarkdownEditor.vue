@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { MdEditor } from 'md-editor-v3'
 import { useAppStore } from '@renderer/stores/app.ts'
-import { MD_TOOLBARS, MD_TOOLBARS_COMPACT } from '@renderer/lib/markdown.ts'
+import { setupMarkdownEditor, MD_TOOLBARS, MD_TOOLBARS_COMPACT } from '@renderer/lib/markdown.ts'
 import { cn } from '@renderer/lib/utils.ts'
 
 /**
@@ -19,6 +19,8 @@ import { cn } from '@renderer/lib/utils.ts'
  */
 const props = defineProps<{ compact?: boolean; class?: string }>()
 const model = defineModel<string>({ default: '' })
+
+setupMarkdownEditor()
 
 const app = useAppStore()
 const theme = computed(() => (app.data.settings.appearance.mode === 'dark' ? 'dark' : 'light'))

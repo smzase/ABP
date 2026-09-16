@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, defineAsyncComponent } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Trash2 } from '@lucide/vue'
 import { useAppStore } from '@renderer/stores/app.ts'
 import UiInput from '@renderer/components/ui/UiInput.vue'
 import UiLabel from '@renderer/components/ui/UiLabel.vue'
 import UiButton from '@renderer/components/ui/UiButton.vue'
-import UiMarkdownEditor from '@renderer/components/ui/UiMarkdownEditor.vue'
 import { confirm } from '@renderer/lib/confirm.ts'
+
+const UiMarkdownEditor = defineAsyncComponent(() => import('@renderer/components/ui/UiMarkdownEditor.vue'))
 
 const props = defineProps<{ id: string }>()
 const { t } = useI18n()

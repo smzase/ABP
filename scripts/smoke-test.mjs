@@ -3,9 +3,8 @@
  *
  * 判定：
  * - 存活 ≥12s → PASS
- * - 提前退出，但 boot 日志证明主进程已正常启动（无 JS 异常）→ 当前环境无 GPU/显示会话，
- *   GUI 无法存活属环境限制 → SKIP（真实桌面不受影响）
- * - 提前退出且崩溃日志有 JS 异常 / 无 boot 日志 → FAIL
+ * - 提前退出且有明确 GPU 致命错误（无 JS 异常）→ 环境限制，SKIP
+ * - 其他提前退出 / JS 异常 → FAIL；boot 日志或 code=0 不能证明窗口启动成功
  *
  * 运行：node scripts/smoke-test.mjs [exe路径]
  */
@@ -48,17 +47,29 @@ function readCrashLog() {
 const logBefore = readCrashLog()
 
 console.log(`拉起 ${exe}（12 秒观察窗口）…`)
+const env = { ...process.env, NODE_OPTIONS: '', ANIBT_DISABLE_GPU: '1', ABP_DEBUG: '1' }
+delete env.ELECTRON_RUN_AS_NODE
 const child = spawn(exe, [], {
-  env: { ...process.env, ANIBT_DISABLE_GPU: '1', ABP_DEBUG: '1' },
+  env,
   stdio: ['ignore', 'pipe', 'pipe']
 })
 
 let stderr = ''
+let observed = false
+let observationTimer
+let shutdownTimer
 child.stderr.on('data', (d) => {
   stderr += d.toString()
 })
 
+child.on('error', (error) => {
+  console.error(`FAIL：无法启动产物：${error.message}`)
+  process.exit(1)
+})
+
 child.on('exit', (code) => {
+  clearTimeout(observationTimer)
+  clearTimeout(shutdownTimer)
   const newLog = readCrashLog().slice(logBefore.length)
   const booted = /boot:/.test(newLog)
   const hasJsError = /uncaughtException|unhandledRejection/.test(newLog)
@@ -68,22 +79,26 @@ child.on('exit', (code) => {
     console.error(newLog)
     process.exit(1)
   }
-  if (booted || gpuFatal || code === 0) {
-    // boot 日志能证明主进程正常时最硬；本环境（无 GPU VM）连 boot 都可能被 GPU FATAL 抢先截断，
-    // 此时 stderr 特征 / code=0 快速退出也指向同一环境限制
+  if (observed) {
+    console.log('进程稳定存活 12 秒且没有 JS 异常，冒烟通过 ✓')
+    process.exit(0)
+  }
+  if (gpuFatal) {
     console.log(
-      `SKIP：当前环境无 GPU/显示会话，Electron GPU 子进程无法存活（code=${code}，boot=${booted}）。\n` +
-        '已验证主进程可正常启动且无 JS 异常，属环境限制；真实桌面不受影响。'
+      `SKIP：检测到 GPU 致命错误（code=${code}，boot=${booted}），当前环境未完成窗口启动验证。`
     )
     process.exit(0)
   }
-  console.error(`FAIL：进程提前退出（code=${code}）且未见 boot 日志`)
+  console.error(`FAIL：进程提前退出（code=${code}，boot=${booted}），未完成 12 秒观察`)
   if (stderr) console.error(stderr.slice(-2000))
   process.exit(1)
 })
 
-setTimeout(() => {
-  console.log('进程稳定存活 12 秒，冒烟通过 ✓')
+observationTimer = setTimeout(() => {
+  observed = true
   child.kill('SIGTERM')
-  setTimeout(() => process.exit(0), 500)
+  shutdownTimer = setTimeout(() => {
+    console.error('FAIL：受测进程未能在测试结束后退出')
+    process.exit(1)
+  }, 5000)
 }, 12000)

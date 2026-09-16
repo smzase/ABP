@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Trash2, Languages, Loader2, AlertCircle, ChevronDown } from '@lucide/vue'
 import { CollapsibleRoot, CollapsibleTrigger, CollapsibleContent } from 'reka-ui'
@@ -12,7 +12,6 @@ import UiSelectItem from '@renderer/components/ui/UiSelectItem.vue'
 import UiSwitch from '@renderer/components/ui/UiSwitch.vue'
 import UiCard from '@renderer/components/ui/UiCard.vue'
 import UiTooltip from '@renderer/components/ui/UiTooltip.vue'
-import UiMarkdownEditor from '@renderer/components/ui/UiMarkdownEditor.vue'
 import { confirm } from '@renderer/lib/confirm.ts'
 import { cn } from '@renderer/lib/utils.ts'
 import { renderTemplate } from '@shared/template.ts'
@@ -20,6 +19,8 @@ import { RESOLUTIONS, SUBTITLE_TYPES, VIDEO_FORMATS } from '@shared/types.ts'
 import { SUBTITLE_TYPE_I18N_KEY } from '@shared/constants.ts'
 import LanguageMultiSelect from '@renderer/components/LanguageMultiSelect.vue'
 import type { AnimeFilenameExample, LanguageCode, SubtitleType, TitleVariant } from '@shared/types.ts'
+
+const UiMarkdownEditor = defineAsyncComponent(() => import('@renderer/components/ui/UiMarkdownEditor.vue'))
 
 /**
  * 番剧模板编辑器，三块：

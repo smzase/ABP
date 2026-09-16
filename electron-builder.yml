@@ -14,6 +14,14 @@ files:
   - 'out/**'
   - 'package.json'
 asar: true
+# Electron 默认会把 50 MiB 左右的全部 Chromium 界面语言包复制进每个产物。
+# 应用自己的语言由 Vue i18n 提供，只保留系统菜单/Chromium 需要的三种语言。
+electronLanguages:
+  - en-US
+  - zh-CN
+  - zh-TW
+# 平衡体积与解压速度；AppImage 启动也需要读取压缩内容。
+compression: normal
 afterPack: scripts/verify-package.cjs
 npmRebuild: false
 # 全部依赖打包进 out/，dependencies 为空 → asar 内没有 node_modules
@@ -25,6 +33,8 @@ win:
     - nsis
     - portable
 nsis:
+  # 保留小字典、非固实压缩。Setup 与 portable 共用归档，后者每次启动都要解压。
+  differentialPackage: true
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
@@ -33,6 +43,10 @@ nsis:
 portable:
   artifactName: ${productName}-${version}-windows-${arch}-portable.${ext}
 mac:
+  electronLanguages:
+    - en
+    - zh_CN
+    - zh_TW
   artifactName: ${productName}-${version}-macos-${arch}.${ext}
   identity: null
   notarize: false
@@ -47,6 +61,7 @@ linux:
     - AppImage
     - deb
 appImage:
+  compression: gzip
   artifactName: ${productName}-${version}-linux-${arch}.${ext}
 deb:
   artifactName: ${productName}-${version}-linux-${arch}.${ext}

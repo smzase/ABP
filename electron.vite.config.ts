@@ -12,6 +12,7 @@ export default defineConfig({
       }
     },
     build: {
+      minify: 'esbuild',
       rollupOptions: {
         input: { index: resolve('src/main/index.ts') }
       }
@@ -25,6 +26,7 @@ export default defineConfig({
       }
     },
     build: {
+      minify: 'esbuild',
       rollupOptions: {
         input: { index: resolve('src/preload/index.ts') }
       }
@@ -41,9 +43,12 @@ export default defineConfig({
       }
     },
     build: {
+      minify: 'esbuild',
       rollupOptions: {
         input: { index: resolve('src/renderer/index.html') },
         output: {
+          // Keep shared Vue code out of lazy editor chunks, otherwise startup imports them too.
+          onlyExplicitManualChunks: true,
           manualChunks(id: string) {
             if (id.includes('@codemirror') || id.includes('/codemirror/')) return 'codemirror'
             if (id.includes('md-editor-v3')) return 'md-editor'

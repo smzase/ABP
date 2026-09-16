@@ -15,11 +15,18 @@
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
-const { app, BrowserWindow } = require('electron')
+const { app, BrowserWindow, session } = require('electron')
 
 // ---- 配置目录隔离：必须在 require 主进程之前改，否则 store.load() 已经读过真实目录了
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'abp-ui-probe-'))
 app.setPath('documents', sandbox)
+app.setPath('userData', sandbox)
+app.once('ready', () => {
+  session.defaultSession.webRequest.onBeforeRequest(
+    { urls: ['http://*/*', 'https://*/*'] },
+    (_details, callback) => callback({ cancel: true })
+  )
+})
 
 require(path.join(__dirname, '..', 'out', 'main', 'index.js'))
 
@@ -43,7 +50,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 async function waitFor(win, expr, { timeout = 6000, interval = 120 } = {}) {
   const deadline = Date.now() + timeout
   for (;;) {
-    const ok = await js(win, `(()=>{ try { return !!(${expr}) } catch { return false } })()`)
+    const ok = await js(win, `(async()=>{ try { return !!(await (${expr})) } catch { return false } })()`)
     if (ok) return true
     if (Date.now() >= deadline) return false
     await wait(interval)
@@ -109,6 +116,13 @@ function pressKey(win, keyCode) {
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode })
   win.webContents.sendInputEvent({ type: 'keyUp', keyCode })
   return wait(250)
+}
+
+async function editMarkdown(win, text) {
+  if (!(await waitFor(win, `document.querySelector('.md-editor .cm-content')`))) return false
+  await js(win, `(()=>{const e=document.querySelector('.md-editor .cm-content'); e.scrollIntoView({block:'center'}); e.focus()})()`)
+  await win.webContents.insertText(text)
+  return waitFor(win, `document.querySelector('.md-editor-preview')?.textContent.includes(${JSON.stringify(text)})`)
 }
 
 function nav(win, index) {
@@ -217,6 +231,23 @@ function bundleUsesNativeConfirm() {
 }
 
 async function run(win) {
+  // Inspect parsed modules: file:// resources do not appear in PerformanceResourceTiming.
+  const scripts = new Set()
+  const onScript = (_event, method, params) => {
+    if (method === 'Debugger.scriptParsed' && params.url) scripts.add(params.url)
+  }
+  win.webContents.debugger.attach('1.3')
+  win.webContents.debugger.on('message', onScript)
+  try {
+    await win.webContents.debugger.sendCommand('Debugger.enable')
+    const editorScripts = [...scripts].filter(url => /\/(?:codemirror|md-editor|UiMarkdownEditor)-[^/]+\.js$/.test(url))
+    check('发布首屏不加载 Markdown / CodeMirror', editorScripts.length === 0, JSON.stringify(editorScripts))
+    check('模块加载检查实际捕获到首屏脚本', [...scripts].some(url => /\/PublishView-[^/]+\.js$/.test(url)))
+  } finally {
+    win.webContents.debugger.off('message', onScript)
+    win.webContents.debugger.detach()
+  }
+
   // ---------- 外观：默认浅色 ----------
   check('默认浅色模式（html 上没有 .dark）', !(await js(win, `document.documentElement.classList.contains('dark')`)))
 
@@ -324,6 +355,15 @@ async function run(win) {
   check('切到「简介模板」tab', await clickByText(win, '简介模板', { exact: true }))
   await wait(600)
   const wDesc = await sideWidth('main .border-r')
+  check('创建用于回归测试的简介模板', await clickByText(win, '添加简介模板', { exact: true }))
+  check('简介模板异步编辑器可以输入并实时预览', await editMarkdown(win, 'ABP desc roundtrip'))
+  check('简介模板的异步 v-model 已保存', await waitFor(win,
+    `window.api.loadStore().then(data => data.descTemplates.some(t => t.markdown.includes('ABP desc roundtrip')))`))
+  await clickByText(win, '标题模板', { exact: true })
+  await waitFor(win, `!document.querySelector('.md-editor')`)
+  await clickByText(win, '简介模板', { exact: true })
+  check('简介模板重新打开后内容仍在', await waitFor(win,
+    `document.querySelector('.md-editor .cm-content')?.textContent.includes('ABP desc roundtrip')`))
   // ---------- 番剧模板：bgmId 输入不再被吞 + 繁化姬按钮 ----------
   check('切到「番剧模板」tab', await clickByText(win, '番剧模板', { exact: true }))
   await wait(600)
@@ -382,11 +422,13 @@ async function run(win) {
     examplesCollapsed && examplesCollapsed.icon === true,
     JSON.stringify(examplesCollapsed)
   )
+  await js(win, `document.querySelector('[data-probe=filename-examples-trigger]').scrollIntoView({block:'center',behavior:'instant'})`)
   check(
     '展开「种子名示例」',
     await clickElementAt(win, "document.querySelector('[data-probe=filename-examples-trigger]')")
   )
-  await waitFor(win, "document.querySelector('[data-probe=filename-examples-trigger]')?.getAttribute('data-state')==='open'")
+  check('种子名示例已展开且内容已挂载', await waitFor(win,
+    "document.querySelector('[data-probe=filename-examples-trigger]')?.getAttribute('data-state')==='open' && document.querySelector('[data-example-row]')"))
   const examplesLayout = await js(
     win,
     "(()=>{const root=document.querySelector('[data-probe=filename-examples]');" +
@@ -575,7 +617,7 @@ async function run(win) {
   check('八个关键帧全部注册', Array.isArray(kf) && kf.length === 0, `缺: ${JSON.stringify(kf)}`)
 
   // ---------- md-editor：行号槽 + 不横向溢出 ----------
-  const hasEditor = await js(win, `!!document.querySelector('.md-editor')`)
+  const hasEditor = await waitFor(win, `document.querySelector('.md-editor .cm-content')`)
   check('番剧模板页有 Markdown 编辑器', hasEditor)
   check('Markdown 编辑器有行号槽', hasEditor && (await js(win, `!!document.querySelector('.md-editor .cm-gutters')`)))
   const overflow = await js(
@@ -588,6 +630,16 @@ async function run(win) {
     overflow && overflow.ed !== null && overflow.ed <= 1 && overflow.main <= 1,
     JSON.stringify(overflow)
   )
+  check('番剧简介异步编辑器可以输入并实时预览', await editMarkdown(win, 'ABP anime roundtrip'))
+  check('番剧简介的异步 v-model 已保存', await waitFor(win,
+    `window.api.loadStore().then(data => data.animeTemplates.some(t => t.descriptionMd.includes('ABP anime roundtrip')))`))
+  const editorTheme = await js(win, `(()=>{
+    const e=document.querySelector('.md-editor'); const reference=document.createElement('div')
+    reference.style.backgroundColor='var(--card)'; document.body.append(reference)
+    const matches=getComputedStyle(e).backgroundColor===getComputedStyle(reference).backgroundColor
+    reference.remove(); return matches
+  })()`)
+  check('异步加载的编辑器样式仍跟随应用主题', editorTheme)
 
   // ---------- 确认弹窗是应用内的，且关掉之后输入框还能打字 ----------
   // 这是本轮最重要的回归：window.confirm 是系统模态框，关掉之后键盘焦点回不到 webContents，
@@ -782,6 +834,16 @@ async function run(win) {
       return b?{disabled:b.disabled}:null})()`
   )
   check('填上标题后发布按钮恢复可用', pubBtn2 && pubBtn2.disabled === false, JSON.stringify(pubBtn2))
+
+  check('展开发布行的简介编辑器', await clickElementAt(win, `document.querySelector('main button[title="展开"]')`))
+  check('发布行异步编辑器可以输入并实时预览', await editMarkdown(win, 'ABP publish roundtrip'))
+  await nav(win, 4)
+  await waitFor(win, `!document.querySelector('.md-editor')`)
+  await nav(win, 0)
+  check('发布简介在切换页面后保留', await waitFor(win,
+    `document.querySelector('.md-editor .cm-content')?.textContent.includes('ABP publish roundtrip')`))
+  await clickElementAt(win, `document.querySelector('main button[title="展开"]')`)
+  check('收起发布行会销毁编辑器实例', await waitFor(win, `!document.querySelector('.md-editor')`))
 
   // 打开 Preview 开关
   const previewSwitch = `[...document.querySelectorAll('button[role=switch]')].find(b=>b.closest('label')&&b.closest('label').textContent.includes('Preview'))`
