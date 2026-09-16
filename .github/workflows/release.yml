@@ -66,6 +66,8 @@ jobs:
 
       - name: Smoke test Windows artifact
         if: runner.os == 'Windows'
+        env:
+          ABP_SMOKE_ARCH: ${{ matrix.arch }}
         run: npm run smoke
 
       # 每个 Artifact 只收录一个平台、架构和包类型的文件。

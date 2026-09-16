@@ -17,11 +17,12 @@ import path from 'node:path'
 const root = path.resolve(import.meta.dirname, '..')
 const crashLog = path.join(os.tmpdir(), 'abp-crash.log')
 
-function findExe() {
+function findExe(arch = process.env.ABP_SMOKE_ARCH ?? process.arch) {
+  const unpacked = arch === 'x64' ? 'win-unpacked' : `win-${arch}-unpacked`
   const candidates = [
-    path.join(root, 'release', 'win-unpacked', 'AniBT Publish.exe'),
-    path.join(root, 'dist-release', 'win-unpacked', 'AniBT Publish.exe'),
-    path.join(root, 'release-test', 'win-unpacked', 'AniBT Publish.exe')
+    path.join(root, 'release', unpacked, 'AniBT Publish.exe'),
+    path.join(root, 'dist-release', unpacked, 'AniBT Publish.exe'),
+    path.join(root, 'release-test', unpacked, 'AniBT Publish.exe')
   ]
   for (const c of candidates) {
     if (fs.existsSync(c)) return c
@@ -31,7 +32,8 @@ function findExe() {
 
 const exe = process.argv[2] ?? findExe()
 if (!exe) {
-  console.error('找不到打包产物 exe，请先运行 npm run pack:win')
+  const arch = process.env.ABP_SMOKE_ARCH ?? process.arch
+  console.error(`找不到 Windows ${arch} 打包产物 exe，请先运行 npm run pack:win -- --${arch}`)
   process.exit(1)
 }
 
