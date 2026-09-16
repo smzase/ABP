@@ -1,0 +1,295 @@
+# AGENTS.md
+
+Project briefing for AI coding agents. Read this before making changes.
+
+## What this project is
+
+**AniBT Publish (ABP)**: a desktop publishing client for the AniBT site (anibt.net),
+focused on anime releases. Electron + Vue 3 + TypeScript, targeting three platforms
+(Windows / macOS / Linux). Only the Anime category is supported — no manga, music, etc.
+
+## Stack and layout
+
+- Build: electron-vite (three targets: main / preload / renderer)
+- Renderer: Vue 3 + vue-router + pinia + vue-i18n (zh-CN / zh-TW / en)
+- UI: Tailwind CSS v4 (`@tailwindcss/vite`) + shadcn conventions (**no CLI** — components
+  are hand-written in `src/renderer/src/components/ui/`, using reka-ui + cva + `cn()`)
+- Markdown editor: md-editor-v3, always via the `UiMarkdownEditor.vue` wrapper
+  (never import `MdEditor` directly — see rule 9). The `@codemirror/language-data`
+  alias stub in `electron.vite.config.ts` strips ~113 syntax chunks — do not revert.
+- Packaging: electron-builder (`electron-builder.yml`)
+
+```
+src/
+  main/       # Electron main process: window, config store, IPC, AniBT API (net.fetch), proxy,
+              # secrets.json (encrypted API keys)
+  preload/    # contextBridge; types inferred from IpcChannels
+  shared/     # Pure logic (template engine, subtitle detection, bencode, filename parsing,
+              # store-doc sanitizing, secrets crypto)
+              # NOTE: erasable TS syntax only (no enum/namespace) — node runs these files
+              # directly for unit tests
+  renderer/   # Vue app
+scripts/      # run-checks.mjs (pure-logic unit tests), ui-probe.cjs (live-window UI probe),
+              # smoke-test.mjs (artifact smoke test)
+```
+
+## Hard rules
+
+1. **Contract-driven IPC**: channel signatures live in `IpcChannels` in `src/shared/types.ts`.
+   Adding a channel takes three steps: (1) write the signature in types.ts,
+   (2) add the handler in `main/ipc.ts`, (3) expose one more method in `preload/index.ts`.
+2. **Config directory**: Windows = `Documents/AniBT Publish/` (same for the portable
+   single-exe build); macOS = `~/Library/Application Support/AniBT Publish/`;
+   Linux = `$XDG_CONFIG_HOME/anibt-publish`. See `main/paths.ts` — do not move it.
+3. **Artifact purity**: keep `dependencies` in package.json empty — everything goes in
+   devDependencies and gets bundled into `out/`; the asar must contain no node_modules.
+   After touching packaging config, verify with
+   `npx asar list release/win-unpacked/resources/app.asar`.
+4. **No prop mutation**: child components use `emit('update:entry', {...})` and the
+   parent/store replaces the whole object. Or fetch the object from the store by id and
+   mutate it there (the store is the single source of truth).
+   `vue/no-mutating-props` is an error.
+   Corollary: after a patch-and-replace, the old `props.x` reference is an **orphan** —
+   pass the id and re-look-up (see `publishStore.applyTemplate(id)`), don't keep using it.
+5. **No direct `window` access in templates**: wrap it in a script function and bind that.
+6. **Frameless window**: the title bar is custom-drawn (`TitleBar.vue`) and must **not**
+   show the project name.
+7. **Theming**: light background `#fafafa`, dark background `#191a1b`; **light is the
+   default** (`store-doc.ts`, `index.html` must carry no `class="dark"`, and
+   `createMainWindow(mode)` picks the first-paint `backgroundColor`). The accent color is
+   written to the `--primary` CSS variable at runtime; presets `#fb7299` (default) /
+   `#00b3f2` / `#fb923c` plus a user-defined custom color.
+8. **API keys never touch config.json.** They live in `secrets.json` next to it,
+   AES-256-GCM, key derived in `shared/secrets-crypto.ts` from an in-app passphrase so the
+   file is **portable** (the single-exe build can move machines). This is
+   **obfuscation-grade**: it stops plaintext leaks (screenshots, cloud sync, accidental
+   commits), not someone who reverse-engineers the exe. Never log key material.
+   `ConfigStore` splits on save and merges back on load, so the renderer still sees one
+   `AppData` with `groups[].apiKey` populated.
+
+## reka-ui / md-editor-v3 / Tailwind traps (each of these shipped a silent UI regression)
+
+9. **`TooltipProvider` must wrap the whole app** (it lives in `App.vue`). reka-ui's
+   `TooltipRoot` *throws* `Injection Symbol(TooltipProviderContext) not found` without it,
+   and Vue then renders **nothing** for that subtree — so anything inside a `UiTooltip`
+   silently vanishes while lint/typecheck/tests stay green. This is what ate the template
+   variable buttons, the 繁化姬 convert button and the Preview switch. Same shape applies
+   to any reka-ui `*Provider`.
+10. **md-editor-v3 fetches from unpkg.com unless you say no.** Its highlight / katex /
+    mermaid / echarts / prettier / cropper extensions inject a `<script>` from the CDN
+    when no `instance` is supplied — `instance: null` does **not** disable it, it *is* the
+    trigger. The only reliable off switch is the `no-highlight` / `no-katex` / `no-mermaid`
+    / `no-echarts` / `no-prettier` / `no-upload-img` props, plus keeping `fullscreen`
+    (screenfull) out of the toolbar. All of that is centralized in
+    `components/ui/UiMarkdownEditor.vue` — **use the wrapper, never `MdEditor` directly**,
+    or the CSP (`script-src 'self'`) will start rejecting requests again.
+11. **Controlled inputs must not reject keystrokes.** `<UiInput :model-value="x" @update…>`
+    is fully controlled: if the handler refuses a value (failed `Number()` parse,
+    out-of-range, `.trim()`, `.toUpperCase()`), Vue snaps the DOM back and the field feels
+    "deletable but not typeable". For numeric/normalized fields keep a raw-text `ref` and
+    write through only what parses (see `bgmIdText`, `portText`); do normalization on
+    `@blur`.
+12. **`CollapsibleRoot` ignores `defaultOpen` once `open` is bound.** Passing both puts it
+    in controlled mode. `UiCollapsible` therefore owns its own state seeded from
+    `defaultOpen`.
+13. **`body { user-select: none }` needs an escape hatch** for `input`/`textarea`/
+    `[contenteditable]`/`.cm-editor` (see `main.css`), otherwise text inside inputs can't
+    be selected or copied.
+14. **Never call `window.confirm` / `alert` / `prompt`.** They open a *native* modal; on
+    Windows the keyboard focus frequently does not come back to the webContents after it
+    closes, and every input in the app then feels "deletable but not typeable" — the exact
+    symptom of rule 11, but triggered by a dialog instead of a rejected keystroke. Use
+    `confirm()` from `renderer/src/lib/confirm.ts` (reka-ui `AlertDialog`, rendered by
+    `UiConfirmDialog` in `App.vue`). The probe asserts no `window.confirm(` survives in the
+    built bundle.
+15. **Tailwind v4 has no `animate-in` / `fade-in-0` / `zoom-in-95`.** Those came from the
+    v3-era `tailwindcss-animate` plugin; in v4 they compile to **nothing**, so animation
+    classes look right in the source and do nothing at runtime (this is why the whole app
+    had no motion). Animations are hand-written in `main.css`: `@keyframes` + matching
+    `--animate-*` vars in `@theme inline`, which is what makes Tailwind emit the utility.
+    Adding a new animation means adding **both** halves. A `prefers-reduced-motion` guard
+    turns them all off.
+16. **Selects must be `UiSelect` + `UiSelectItem`, never a native `<select>`/`<option>`.**
+    A native select pops the *operating system's* list: square corners, system colors, no
+    theming, no animation. `UiSelect` wraps reka-ui so the listbox is in-app DOM. Note
+    reka-ui reserves the empty string for "clear selection", so a placeholder is the
+    `placeholder` prop, not an `<option value="">`.
+17. **md-editor-v3 previews on a 500 ms debounce** (`renderDelay` in its config), which
+    reads as "the preview lags half a second behind my typing". `lib/markdown.ts` sets it
+    to `0`.
+18. **Tailwind v4 emits `translate` as its own property, not inside `transform`.**
+    `-translate-x-1/2` compiles to `translate: calc(-1/2 * 100%) ...`, so a keyframe that
+    also writes `transform: translate(-50%,-50%)` *stacks* with it — the element animates
+    from -100% and visibly flies in from the top-left before snapping to center. Keyframes
+    used on centered elements must animate `scale`/`opacity` only and leave positioning to
+    the `translate` property.
+19. **Don't wrap the confirm/cancel buttons in `AlertDialogAction`/`AlertDialogCancel`
+    when the result drives a Promise.** Those components carry their own close handler
+    that races the button's `@click`; when reka's runs first it fires
+    `onOpenChange(false)`, settles the Promise as `false`, and the caller sees a *cancel*
+    even though the user clicked confirm — "I click delete and nothing gets deleted".
+    `UiConfirmDialog` uses plain buttons that call `settleConfirm()` explicitly, and
+    `settleConfirm` is idempotent so the trailing `onOpenChange` is a no-op.
+    Test both branches: a probe that only exercises cancel passes while confirm is broken.
+20. **reka-ui components are picky about synthetic events — drive them with real input.**
+    `SelectTrigger` listens on **`pointerdown`**, so `el.click()` never opens the listbox
+    (the probe then asserts against an empty option list and "proves" a bug that isn't
+    there). Worse, a dispatched `pointerdown` on a `SelectItem` *highlights* it but does
+    not commit the selection. In the probe: open with dispatched pointer events
+    (`openSelectByText`), but **click options via `sendInputEvent` at real coordinates**
+    (`clickElementAt`). When a probe assertion fails, first reproduce the interaction with
+    real mouse events before concluding the product is broken.
+21. **`TooltipTrigger` keeps `data-state="closed"` even when the tooltip is disabled**, so
+    that attribute cannot tell you whether a tooltip is actually wired up. Assert on
+    behavior instead: move the mouse over the trigger with `sendInputEvent` and count
+    `[role=tooltip]` nodes. The sidebar needs **both** directions checked — expanded must
+    not pop a bubble (the label is already on the button), collapsed must still pop one
+    (the icon is all there is).
+22. **Never hand a Vue reactive object to `window.api.*`.** `reactive`/`ref` return
+    **Proxies**, and the contextBridge/IPC boundary uses structured clone, which rejects
+    them with `DataCloneError: An object could not be cloned.` The failure is far from
+    the cause: a publish payload can be fifteen plain strings plus **one** array taken
+    straight off the store (`entry.languages`) and the whole call dies, with nothing in
+    the message naming the field. Wrap every outbound object in `toPlain()` from
+    `shared/plain.ts` (do *not* use it on binary — `Uint8Array` would JSON-ify into
+    `{"0":…}`; the torrent-bytes path passes a freshly built array and must stay raw).
+    `window.api` is frozen by contextBridge, so you cannot stub it from the page — the
+    mechanism is unit-tested with real Vue reactivity in `run-checks.mjs`, and the probe
+    only asserts the `toPlain` call survives in the bundle.
+23. **Cross-page UI state belongs in the store, not in the component.** Route changes
+    unmount the component and reset every local `ref`. The Preview switch in
+    `PublishBatchBar` was a local `ref`: turn it on, visit another page, come back, and
+    it had silently switched itself off — while the queue it applies to (in the store)
+    was still there. If a control describes the queue, it lives next to the queue.
+
+## Domain conventions (shared layer)
+
+These are product decisions, not implementation details — changing them changes what
+users see in published titles.
+
+- **Language order is always `CHS / CHT / JP / EN`.** The word list matches longest-first,
+  which has nothing to do with semantics, so `[JPN][CHS]` would otherwise render as
+  `JP&CHS`. `sortLanguages()` in `constants.ts` is the single choke point; both
+  `languageCodeTag` and `subtitleLangZhTag` run everything through it. Unknown codes
+  (KR, FR…) keep their relative order and sort after the four known ones.
+- **`CHI` / `ZH` mean "Chinese, unspecified" → `CHS + CHT`.** Only `CHS`/`CHT` (and
+  `SC`/`TC`, `GB`/`BIG5`) are a definite single variant. So `CHI_JPN` is
+  `CHS+CHT+JP`, not `CHS+JP`.
+- **No single-CJK-character words in the detection list.** 「日」「英」「繁」appear in
+  ordinary anime titles (夏日重现, 我的英雄学院…) and a one-character rule mislabels
+  every one of them. Two-character combinations (简日, 繁日, 简繁) and boundary-checked
+  latin codes (`JP`, `ENG`) are safe; single characters are not.
+- **Three Chinese-title variables, deliberately.** `{{titleZhHans}}` and
+  `{{titleZhHant}}` are explicit (Hant falls back to Hans when the traditional name is
+  blank — an empty title is worse than an unconverted one). `{{titleZh}}` is the legacy
+  one and **follows the title variant**: under the `trad` variant the publish store
+  passes the traditional name for it. Keep them separate — deriving Hans from `titleZh`
+  makes `{{titleZhHans}}` render traditional text in the trad variant.
+- Template variable names are matched **case-insensitively** (`{{titlezhhans}}` works).
+  Unknown names are still left verbatim so typos are visible in the preview.
+- **Anime templates start blank.** New ones get empty title templates and an empty
+  description rather than a copy of the first global template, and `sanitizeAppData`
+  must not backfill them either — otherwise a field the user cleared grows back on the
+  next load. Users attach a global template explicitly via the picker in
+  `AnimeTemplateEditor`, which reports "自定义" once the text no longer matches any
+  global template (the state is derived by comparing content, so there is no reference
+  field that can go stale).
+
+## AniBT API essentials (wiki.anibt.net/docs)
+
+- Base URL `https://anibt.net`; auth `Authorization: Bearer <KEY>`;
+  scopes: `releases:publish` / `releases:delete`
+- Publish: `POST /api/releases/publish` (multipart must include `torrent`;
+  `animeIdType=bgm` + `animeId`); `preview=true` for a test publish (expires in 10 minutes);
+  409 = same version already exists, bump `version`
+- **Send only non-empty fields.** An empty string is not "use the default" — the server
+  validates it as a supplied value and answers `422 VALIDATION_ERROR / Invalid request
+  body`, naming no field. `title`, `episodeKey`, `resolution`, `format`, `subtitle`,
+  `version` and `notes` are all optional in multipart (title falls back to the torrent's
+  internal name), so omit them rather than sending `""`. Don't send `publishedAt` at all:
+  it is typed `number` and defaults to server-now.
+- **The enums are closed** (source: `wiki.anibt.net/docs/open-api/reference`, mirrored in
+  `shared/constants.ts` as `API_*`):
+  `resolution` = 4K / 2160p / 1080p / 720p / 480p / 360p ·
+  `format` = MKV / MP4 / AVI / WEBM ·
+  `subtitle` = EXTERNAL / INTERNAL / EMBEDDED / NONE ·
+  `language` = CHS / CHT / JP / EN / KO / ES / PT / FR / DE / IT / RU / AR / HI / ID /
+  MS / TH / VI / TL / TR / PL / UK · `notes` ≤ 50000 chars.
+  The resolution/format dropdowns offer a "custom" entry, so a user can type `1440p` or
+  `MOV` and earn a 422. `shared/publish-validate.ts` catches these before the request.
+- Nyaa proxy: `nyaa=true` + `nyaaCategory` (`1_3` is standard for Chinese-subbed anime);
+  the torrent must contain `http://nyaa.tracker.wf:7777/announce`; whitelist-based and
+  handled server-side — the client never talks to Nyaa directly
+- AniBT rejects a publish (including preview) when the trackers extracted from the
+  uploaded torrent exceed 50. The Wiki exposes `trackers: string[]` but does not document
+  this server-side maximum. `normalizeTorrentTrackers()` trims only the in-memory upload
+  copy, prioritizes AniBT/Nyaa trackers, and preserves the raw `info` dictionary so the
+  info hash cannot change. Do not merely truncate `TorrentMeta.trackers`: the server
+  extracts trackers again from the uploaded bytes.
+- Delete: `DELETE /api/releases/{releaseId}` (200 = done / 202 = accepted, then poll
+  `GET .../deletion`)
+- Bangumi search: `GET /api/bgm/search?q=` (public)
+- The main-process wrapper is `main/anibt.ts`, built on Electron `net.fetch`
+  (inherits the session proxy)
+- **Never swallow the error body.** A 422's `message` is just "Invalid request body"; the
+  useful part is `details` / `issues` / `fields` underneath it. `readError` reads the body
+  as text once, then tries JSON, so non-JSON gateway errors still surface. Surface the
+  result *in the row*, not only in a `title` tooltip — a bare red ✗ tells the user
+  nothing.
+- **The docs are reachable from the dev box even when the agent sandbox can't fetch
+  them.** `https://wiki.anibt.net/llms.txt` indexes every page, and each page has a
+  `.md` twin (e.g. `/en/docs/open-api/reference.md`). Read the contract instead of
+  guessing at it.
+
+## Verification flow (must run after changes)
+
+```bash
+npm run lint        # 0 problems
+npm run typecheck   # node + web tsconfigs
+npm test            # pure-logic unit tests (shared layer)
+npm run build       # real build
+npm run probe       # live-window UI probe (needs npm run build first)
+npm run pack:win    # real packaging (Windows)
+node scripts/smoke-test.mjs   # launch the packed artifact
+```
+
+`npm run probe` boots the built main process, drives the real window with
+`sendInputEvent` / `executeJavaScript`, and asserts the UI invariants that lint and
+typecheck cannot see (rules 9–23 above), plus that `config.json` holds no key material.
+It redirects the config dir to a temp folder, so it never touches the user's real
+`Documents/AniBT Publish`. **Add a check here whenever you fix a "the UI silently
+disappeared / the field won't accept input" class of bug.**
+
+Some invariants can only be asserted against a live window, not the source — e.g. the
+probe creates a throwaway element and reads `getComputedStyle().animationName` to prove
+the `animate-*` utilities actually compiled, because a Tailwind class that generates no
+CSS is indistinguishable from a correct one by reading the template. Likewise it reads the
+dialog's `getBoundingClientRect()` on the first frame to catch the translate-stacking bug.
+
+Probe ordering matters: the confirm-delete check removes the template it was working on,
+so every assertion that needs a selected template must come before it.
+
+**The probe must not hit the network.** It runs unattended and on CI; a "just let it 401"
+publish still ships a torrent and an API key to anibt.net. When a bug lives on the far
+side of an IPC call, assert the part that fails locally (the payload, the guard in the
+bundle) and cover the mechanism itself in `run-checks.mjs`.
+
+**Wait on conditions, not on the clock.** Fixed `sleep`s were this probe's main source of
+flakiness: too short and a busy machine fails intermittently, too long and every run pays
+for it. Worse, the failure *cascades* — a dialog that closes one tick late leaves its
+overlay up, the next few clicks land on the overlay, and the reported failure is three
+assertions downstream with a name that has nothing to do with the cause. Use `waitFor`.
+For the same reason `clickElementAt` re-reads the element's rect immediately before
+dispatching: anything that re-renders in between (typing, a store patch, a list reorder)
+invalidates coordinates captured earlier.
+
+On this Windows dev box `ELECTRON_RUN_AS_NODE=1` is set in the environment, which makes
+`electron.exe` run any script as plain node (`require('electron')` then returns a path
+string and `app` is undefined). Clear it first:
+
+```powershell
+$env:ELECTRON_RUN_AS_NODE=$null; $env:NODE_OPTIONS=""
+```
+
+Any change to bencode / parsers / secrets crypto must come with malformed-input tests
+(over-declared lengths, truncated input, garbage bytes, tampered GCM tags).

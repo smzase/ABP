@@ -1,0 +1,302 @@
+@import 'tailwindcss';
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * shadcn 约定的主题 token。
+ * 浅色主背景 #fafafa，深色主背景 #191a1b（需求定死）。
+ * 主题色 --primary 由 JS 动态写入（预设 #fb7299 / #00b3f2 / #fb923c + 自定义）。
+ */
+:root {
+  --background: #fafafa;
+  --foreground: #171717;
+  --card: #ffffff;
+  --card-foreground: #171717;
+  --popover: #ffffff;
+  --popover-foreground: #171717;
+  --primary: #fb7299;
+  --primary-foreground: #ffffff;
+  --secondary: #f0f0f1;
+  --secondary-foreground: #171717;
+  --muted: #f0f0f1;
+  --muted-foreground: #6b6f76;
+  --accent: #f0f0f1;
+  --accent-foreground: #171717;
+  --destructive: #e5484d;
+  --destructive-foreground: #ffffff;
+  --border: #e3e4e6;
+  --input: #e3e4e6;
+  --ring: #fb7299;
+  --radius: 0.625rem;
+}
+
+.dark {
+  --background: #191a1b;
+  --foreground: #e8e9ea;
+  --card: #212224;
+  --card-foreground: #e8e9ea;
+  --popover: #242527;
+  --popover-foreground: #e8e9ea;
+  --primary: #fb7299;
+  --primary-foreground: #ffffff;
+  --secondary: #2b2c2f;
+  --secondary-foreground: #e8e9ea;
+  --muted: #2b2c2f;
+  --muted-foreground: #9a9ea6;
+  --accent: #2b2c2f;
+  --accent-foreground: #e8e9ea;
+  --destructive: #e5484d;
+  --destructive-foreground: #ffffff;
+  --border: #35373b;
+  --input: #35373b;
+  --ring: #fb7299;
+}
+
+@theme inline {
+  --animate-fade-in: fade-in 150ms ease-out;
+  --animate-fade-out: fade-out 120ms ease-in;
+  --animate-pop-in: pop-in 150ms cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-pop-out: pop-out 120ms ease-in;
+  --animate-slide-up: slide-up 150ms cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-slide-down: slide-down 150ms cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-collapsible-down: collapsible-down 180ms ease-out;
+  --animate-collapsible-up: collapsible-up 150ms ease-in;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+}
+
+* {
+  border-color: var(--border);
+}
+
+/*
+ * 动效关键帧。
+ * Tailwind v4 不再内置 `animate-in` / `fade-in-0` / `zoom-in-95` 那套 ——
+ * 那是 v3 时代 tailwindcss-animate 插件提供的，v4 里这些 class 不生成任何 CSS，
+ * 写了也等于没写（之前 Dialog/Tooltip/Collapsible 上的动画 class 就是这么静默失效的）。
+ * 这里手写关键帧 + @theme inline 里的 --animate-* 变量，Tailwind 便会生成
+ * `animate-fade-in` 之类的 utility。不引第三方插件，保持 dependencies 为空。
+ *
+ * reka-ui 的 Presence 会在关闭时保留元素直到 CSS 动画结束，所以
+ * data-[state=closed]:animate-* 的退场动画能正常播完再卸载。
+ */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+/*
+ * 注意：只动 scale，不要在这里写 translate。
+ * Tailwind v4 的 `-translate-x-1/2` 编译成**独立的 `translate` 属性**
+ * （不是 `transform: translate(...)`），两者会叠加 ——
+ * 关键帧里再写一次 transform: translate(-50%,-50%) 等于位移了 -100%，
+ * 弹窗就会先出现在左上角再「闪」回中间。居中交给 translate 属性，这里只管缩放。
+ */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes pop-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+/* reka-ui 会把内容实际高度写进 --reka-collapsible-content-height */
+@keyframes collapsible-down {
+  from {
+    height: 0;
+    opacity: 0;
+  }
+  to {
+    height: var(--reka-collapsible-content-height);
+    opacity: 1;
+  }
+}
+@keyframes collapsible-up {
+  from {
+    height: var(--reka-collapsible-content-height);
+    opacity: 1;
+  }
+  to {
+    height: 0;
+    opacity: 0;
+  }
+}
+
+/* 系统「减少动态效果」偏好：统一关掉，不跟用户的无障碍设置对着干 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family:
+    'Segoe UI',
+    'PingFang SC',
+    'Microsoft YaHei',
+    system-ui,
+    -apple-system,
+    sans-serif;
+  font-size: 14px;
+  overflow: hidden;
+  user-select: none;
+}
+
+/*
+ * body 上的 user-select:none 会连输入框里的文字一起锁死（选不中、复制不了）。
+ * 所有可编辑区域必须显式放开，顺带确保它们不会被误判进标题栏拖拽区。
+ */
+input,
+textarea,
+select,
+[contenteditable='true'],
+.cm-editor,
+.md-editor {
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-app-region: no-drag;
+}
+
+/* 标题栏拖拽区域 */
+.app-drag {
+  -webkit-app-region: drag;
+}
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* 细滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted-foreground) 35%, transparent);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* md-editor-v3 主题跟随 */
+.md-editor-dark {
+  --md-bk-color: var(--card) !important;
+}
+.md-editor {
+  --md-color: var(--foreground) !important;
+  --md-bk-color: var(--card) !important;
+  --md-border-color: var(--border) !important;
+}
+
+/*
+ * md-editor-v3 布局：跟着容器宽度缩放，绝不横向溢出。
+ * 编辑区本身 CodeMirror 已开 lineWrapping，预览区的长 URL / 长代码要自己兜。
+ */
+.md-editor {
+  max-width: 100%;
+  min-width: 0;
+}
+.md-editor-preview {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.md-editor-preview pre,
+.md-editor-preview code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.md-editor-preview table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* CodeMirror 行号槽（lib/markdown.ts 里挂的 lineNumbers 扩展）配色跟随主题 */
+.md-editor .cm-gutters {
+  background-color: transparent !important;
+  border-right: 1px solid var(--border) !important;
+  color: var(--muted-foreground) !important;
+  user-select: none;
+}
+.md-editor .cm-lineNumbers .cm-gutterElement {
+  padding: 0 0.5rem 0 0.75rem;
+  min-width: 2.25rem;
+}
+.md-editor .cm-activeLineGutter {
+  background-color: color-mix(in srgb, var(--primary) 12%, transparent) !important;
+  color: var(--primary) !important;
+}

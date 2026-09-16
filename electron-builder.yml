@@ -1,0 +1,51 @@
+appId: net.anibt.publish
+productName: AniBT Publish
+copyright: Copyright © 2026
+directories:
+  output: release
+  buildResources: build
+files:
+  - '!src/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  - '!docs/*'
+  - '!{.workbuddy,.github,scripts,build}/**'
+  - '!{AGENTS.md,CLAUDE.md,README.md,eslint.config.js,components.json}'
+  - 'out/**'
+  - 'package.json'
+asar: true
+npmRebuild: false
+# 全部依赖打包进 out/，dependencies 为空 → asar 内没有 node_modules
+win:
+  signAndEditExecutable: false
+  signtoolOptions:
+    sign: false
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: AniBT Publish
+  artifactName: ${productName}-Setup-${version}.${ext}
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}
+mac:
+  identity: null
+  notarize: false
+  category: public.app-category.utilities
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+    - target: zip
+      arch: [x64, arm64]
+linux:
+  category: Utility
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]

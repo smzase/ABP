@@ -1,0 +1,14 @@
+node_modules/
+out/
+release/
+release-test/
+dist-release/
+dist/
+*.local
+.DS_Store
+Thumbs.db
+*.log
+.cache/
+.tmp/
+.workbuddy/
+
