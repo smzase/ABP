@@ -14,6 +14,7 @@ files:
   - 'out/**'
   - 'package.json'
 asar: true
+afterPack: scripts/verify-package.cjs
 npmRebuild: false
 # 全部依赖打包进 out/，dependencies 为空 → asar 内没有 node_modules
 win:
@@ -21,32 +22,31 @@ win:
   signtoolOptions:
     sign: false
   target:
-    - target: nsis
-      arch: [x64]
-    - target: portable
-      arch: [x64]
+    - nsis
+    - portable
 nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
   shortcutName: AniBT Publish
-  artifactName: ${productName}-Setup-${version}.${ext}
+  artifactName: ${productName}-${version}-windows-${arch}-Setup.${ext}
 portable:
-  artifactName: ${productName}-${version}-portable.${ext}
+  artifactName: ${productName}-${version}-windows-${arch}-portable.${ext}
 mac:
+  artifactName: ${productName}-${version}-macos-${arch}.${ext}
   identity: null
   notarize: false
   category: public.app-category.utilities
   target:
-    - target: dmg
-      arch: [x64, arm64]
-    - target: zip
-      arch: [x64, arm64]
+    - dmg
+    - zip
 linux:
   category: Utility
   maintainer: smzase <clsmzase@gmail.com>
   target:
-    - target: AppImage
-      arch: [x64]
-    - target: deb
-      arch: [x64]
+    - AppImage
+    - deb
+appImage:
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}
+deb:
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}

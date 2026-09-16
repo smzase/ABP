@@ -56,9 +56,23 @@ node scripts/smoke-test.mjs
 ```
 
 CI：在 GitHub **Actions → Build Artifacts → Run workflow** 手动触发三端构建。
-通过检查和打包后，在该次运行页面的 **Artifacts** 下载 `anibt-publish-win`（NSIS + portable）、
-`anibt-publish-mac`（x64 / arm64 的 dmg + zip）或 `anibt-publish-linux`（AppImage + deb）。
-产物保留 14 天，只包含安装包，不含 node_modules；不会创建或更新 GitHub Releases，推送 tag 也不会自动运行。
+通过检查和打包后，在该次运行页面的 **Artifacts** 按平台、架构和包类型分别下载：
+
+| 平台 | 架构 | 独立 Artifact |
+| --- | --- | --- |
+| Windows | x64 | `…-windows-x64-portable.exe`、`…-windows-x64-Setup.exe` |
+| Windows | arm64 | `…-windows-arm64-portable.exe`、`…-windows-arm64-Setup.exe` |
+| macOS | x64 | `…-macos-x64.dmg`、`…-macos-x64.zip` |
+| macOS | arm64（Apple Silicon） | `…-macos-arm64.dmg`、`…-macos-arm64.zip` |
+| Linux | x64 | `…-linux-x86_64.AppImage`、`…-linux-amd64.deb` |
+| Linux | arm64 | `…-linux-arm64.AppImage`、`…-linux-arm64.deb` |
+
+共 12 个独立 Artifact，每项直接上传一个安装文件，不再套一层 Artifact ZIP。文件名也标明平台和架构，例如
+`AniBT Publish-0.1.0-windows-x64-portable.exe`。产物保留 14 天，不会创建或更新 GitHub Releases，推送 tag 也不会自动运行。
+
+构建依赖均在 devDependencies，应用所需代码合并进 `out/`，不携带整个 `node_modules`。
+三端打包时都会自动检查实际 `app.asar`，只允许 `out/` 和 `package.json`，混入源码、构建工具或
+`node_modules` 会使打包失败。安装包仍包含运行应用所必需的 Electron / Chromium / Node.js 运行时。
 
 ## 文档
 

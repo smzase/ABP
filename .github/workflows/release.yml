@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ matrix.os }}
+    name: Build ${{ matrix.platform }} ${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
@@ -19,10 +19,22 @@ jobs:
         include:
           - os: windows-2022
             platform: win
+            arch: x64
+          - os: windows-11-arm
+            platform: win
+            arch: arm64
+          - os: macos-15-intel
+            platform: mac
+            arch: x64
           - os: macos-15
             platform: mac
+            arch: arm64
           - os: ubuntu-24.04
             platform: linux
+            arch: x64
+          - os: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -49,24 +61,64 @@ jobs:
         run: npm run probe
 
       # pack:* 脚本都显式带 --publish never，不创建或更新 GitHub Releases。
-      - name: Package ${{ matrix.platform }}
-        run: npm run pack:${{ matrix.platform }}
+      - name: Package ${{ matrix.platform }} ${{ matrix.arch }}
+        run: npm run pack:${{ matrix.platform }} -- --${{ matrix.arch }}
 
       - name: Smoke test Windows artifact
         if: runner.os == 'Windows'
         run: npm run smoke
 
-      # 只上传打包产物（exe / dmg / zip / AppImage / deb），不含任何源码或 node_modules
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      # 每个 Artifact 只收录一个平台、架构和包类型的文件。
+      - name: Upload Windows portable
+        if: matrix.platform == 'win'
+        uses: actions/upload-artifact@v7
         with:
-          name: anibt-publish-${{ matrix.platform }}
-          path: |
-            release/*.exe
-            release/*.dmg
-            release/*.zip
-            release/*.AppImage
-            release/*.deb
+          path: release/*-windows-${{ matrix.arch }}-portable.exe
           if-no-files-found: error
-          compression-level: 0
+          archive: false
+          retention-days: 14
+
+      - name: Upload Windows Setup
+        if: matrix.platform == 'win'
+        uses: actions/upload-artifact@v7
+        with:
+          path: release/*-windows-${{ matrix.arch }}-Setup.exe
+          if-no-files-found: error
+          archive: false
+          retention-days: 14
+
+      - name: Upload macOS DMG
+        if: matrix.platform == 'mac'
+        uses: actions/upload-artifact@v7
+        with:
+          path: release/*-macos-${{ matrix.arch }}.dmg
+          if-no-files-found: error
+          archive: false
+          retention-days: 14
+
+      - name: Upload macOS ZIP
+        if: matrix.platform == 'mac'
+        uses: actions/upload-artifact@v7
+        with:
+          path: release/*-macos-${{ matrix.arch }}.zip
+          if-no-files-found: error
+          archive: false
+          retention-days: 14
+
+      - name: Upload Linux AppImage
+        if: matrix.platform == 'linux'
+        uses: actions/upload-artifact@v7
+        with:
+          path: release/*-linux-*.AppImage
+          if-no-files-found: error
+          archive: false
+          retention-days: 14
+
+      - name: Upload Linux DEB
+        if: matrix.platform == 'linux'
+        uses: actions/upload-artifact@v7
+        with:
+          path: release/*-linux-*.deb
+          if-no-files-found: error
+          archive: false
           retention-days: 14
