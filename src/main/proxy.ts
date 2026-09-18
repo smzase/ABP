@@ -14,7 +14,11 @@ function apiSession(): Session {
 
 export async function applyProxy(proxy: ProxySettings): Promise<void> {
   current = proxy
-  const ses = apiSession()
+  await applyProxyToSession(apiSession(), proxy)
+}
+
+/** Account login partitions must use the same proxy as API requests. */
+export async function applyProxyToSession(ses: Session, proxy: ProxySettings): Promise<void> {
   if (proxy.mode === 'system') {
     await ses.setProxy({ mode: 'system' })
   } else if (proxy.mode === 'direct') {

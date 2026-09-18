@@ -25,7 +25,9 @@ export function setupMarkdownEditor(): void {
     },
     codeMirrorExtensions(extensions) {
       return [
-        ...extensions,
+        // md-editor-v3 默认把超过 30 字符的链接替换成可点击的 “...”。
+        // 这不是 CSS 省略，所以必须移除 CodeMirror 的内置替换扩展。
+        ...extensions.filter((item) => item.type !== 'linkShortener'),
         { type: 'lineNumbers', extension: lineNumbers() },
         { type: 'highlightActiveLineGutter', extension: highlightActiveLineGutter() }
       ]

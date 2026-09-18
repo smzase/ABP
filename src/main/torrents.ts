@@ -7,7 +7,7 @@ import type { TorrentMeta } from '../shared/types.ts'
  * 种子字节内存池：渲染进程把 .torrent 字节送进来，解析后凭 token 取回。
  * 不落地磁盘；条目随条目移除/应用退出释放。
  */
-interface PoolEntry {
+export interface PoolEntry {
   fileName: string
   bytes: Uint8Array
   meta: TorrentMeta

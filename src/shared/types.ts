@@ -22,6 +22,20 @@ export type VideoFormat = string
 
 export type ThemeMode = 'light' | 'dark'
 export type Locale = 'zh-CN' | 'zh-TW' | 'en'
+export type PublishMode = 'anibt' | 'local'
+
+export const PUBLISH_SITES = [
+  'anibt',
+  'mikan',
+  'nyaa',
+  'dmhy',
+  'acgnxAsia',
+  'acgnxGlobal',
+  'bangumiMoe',
+  'acgrip'
+] as const
+export type PublishSite = (typeof PUBLISH_SITES)[number]
+export type DescriptionFormat = 'markdown' | 'html' | 'bbcode'
 
 // ---------- 设置 ----------
 
@@ -58,20 +72,54 @@ export interface Settings {
   proxy: ProxySettings
   subtitleDetect: SubtitleDetectSettings
   sidebarCollapsed: boolean
+  /** 主发布始终是 AniBT；local 是用户显式切换的备用本地直发。 */
+  publishMode: PublishMode
 }
 
 // ---------- 站点账号（组） ----------
 
-export interface GroupAccount {
-  id: string
+export interface StoredSiteCookie {
   name: string
-  /** 站点 API Key（本地保存，勿提交仓库） */
+  value: string
+  domain: string
+  path: string
+  secure: boolean
+  httpOnly: boolean
+  expirationDate?: number
+  sameSite?: 'unspecified' | 'no_restriction' | 'lax' | 'strict'
+}
+
+/** 不同站点只使用与其认证方式有关的字段。 */
+export interface SiteAccountConfig {
+  enabled: boolean
   apiKey: string
-  /** 「检查」后回填 */
+  apiUrl: string
+  apiToken: string
+  uid: string
+  username: string
+  password: string
+  cookies: StoredSiteCookie[]
+  userAgent: string
+  /** 动漫花园/萌番组的发布身份或团队名。 */
+  identityName: string
+  /** Nyaa 直发是否匿名。 */
+  anonymous: boolean
+  subtitleGroupId: number | null
+  subtitleGroupName: string
+  publishGroupId: number | null
+  publishGroupName: string
   slug: string
   scopes: string[]
   status: string
   lastCheckedAt: number | null
+}
+
+export type SiteAccounts = Record<PublishSite, SiteAccountConfig>
+
+export interface GroupAccount {
+  id: string
+  name: string
+  sites: SiteAccounts
 }
 
 // ---------- 模板 ----------
@@ -123,11 +171,16 @@ export interface AnimeTemplate {
   id: string
   /** 必填 */
   bgmId: number | null
+  /** Mikan 自有 Bangumi ID，与 bgm.tv subject id 无关。 */
+  mikanBangumiId: number | null
   names: AnimeNames
   /** 必选：发布用组（GroupAccount.id） */
   groupId: string
   /** 每次发布默认启用 Nyaa 代发 */
   nyaaProxy: boolean
+  nyaaInformation: string
+  nyaaHidden: boolean
+  nyaaRemake: boolean
   /** 繁体标题变体是否将中文标题与字幕标签转换为繁体字 */
   traditionalizeTitle: boolean
   titleTemplates: Record<TitleVariant, string>
@@ -159,6 +212,15 @@ export interface PublishRecord {
   /** ok=成功；deleted=已删除；failed=发布失败 */
   status: 'ok' | 'deleted' | 'failed'
   message?: string
+  mode: PublishMode
+  torrentFileName: string
+  descriptionMd: string
+  mikanBangumiId: number | null
+  nyaaCategory: string
+  nyaaInformation: string
+  nyaaHidden: boolean
+  nyaaRemake: boolean
+  siteResults: SitePublishResult[]
 }
 
 // ---------- 应用数据文档（落盘 config.json） ----------
@@ -267,15 +329,83 @@ export interface PublishResult {
   error?: { code?: string; message: string; httpStatus?: number }
 }
 
-export interface DeleteResult {
+export interface SitePublishResult {
+  site: PublishSite
   ok: boolean
-  state?: 'pending' | 'completed' | 'failed'
+  url?: string
+  error?: string
+  httpStatus?: number
+}
+
+export interface LocalPublishPayload {
+  recordId: string
+  torrentToken?: string
+  torrentFileName: string
+  groupId: string
+  sites: PublishSite[]
+  title: string
+  episodeKey: string
+  resolution: string
+  format: string
+  subtitle: SubtitleType
+  language: LanguageCode[]
+  version: string
+  descriptionMd: string
+  bgmId: number | null
+  mikanBangumiId: number | null
+  nyaaCategory: string
+  nyaaInformation: string
+  nyaaHidden: boolean
+  nyaaRemake: boolean
+}
+
+export interface LocalPublishResult {
+  ok: boolean
+  sites: SitePublishResult[]
   error?: string
 }
 
-export interface ProxyTestResult {
+export interface MikanSearchItem {
+  id: number
+  name: string
+  secondaryName?: string
+}
+
+export type MikanSearchKind = 'bangumi' | 'subtitleGroup' | 'publishGroup'
+
+export interface SiteCheckResult {
+  ok: boolean
+  message: string
+  /** false 表示只能确认配置完整，站点没有无副作用的独立凭据验证接口。 */
+  verified?: boolean
+  identityName?: string
+  slug?: string
+  scopes?: string[]
+}
+
+export interface SiteLoginResult {
+  ok: boolean
+  cookies: StoredSiteCookie[]
+  userAgent: string
+  message?: string
+}
+
+export interface SiteCaptchaResult {
+  ok: boolean
+  dataUrl?: string
+  message?: string
+}
+
+export interface SiteConnectionResult {
+  site: PublishSite
   ok: boolean
   latencyMs?: number
+  error?: string
+}
+
+export interface DeleteResult {
+  ok: boolean
+  state?: 'pending' | 'completed' | 'failed'
   error?: string
 }
 
@@ -304,7 +434,15 @@ export interface IpcChannels {
   'anibt:publish': (payload: PublishPayload) => Promise<PublishResult>
   'anibt:deleteRelease': (apiKey: string, releaseId: string) => Promise<DeleteResult>
   'anibt:deletionStatus': (apiKey: string, releaseId: string) => Promise<DeleteResult>
+  'local:publish': (payload: LocalPublishPayload) => Promise<LocalPublishResult>
+  'local:removeArchive': (recordId: string) => Promise<void>
+  'site:login': (groupId: string, site: PublishSite, account: SiteAccountConfig, captchaCode: string) => Promise<SiteLoginResult>
+  'site:openLogin': (groupId: string, site: PublishSite, account: SiteAccountConfig) => Promise<SiteLoginResult>
+  'site:dmhyCaptcha': (groupId: string, account: SiteAccountConfig) => Promise<SiteCaptchaResult>
+  'site:clearCookies': (groupId: string, site: PublishSite) => Promise<void>
+  'site:check': (site: PublishSite, account: SiteAccountConfig) => Promise<SiteCheckResult>
+  'mikan:search': (kind: MikanSearchKind, query: string) => Promise<ApiResult<MikanSearchItem[]>>
   'proxy:apply': (proxy: ProxySettings) => Promise<void>
-  'proxy:test': (proxy: ProxySettings) => Promise<ProxyTestResult>
+  'proxy:testSite': (site: PublishSite) => Promise<SiteConnectionResult>
   'zhconvert:traditional': (text: string) => Promise<ApiResult<string>>
 }

@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { getConfigDir, getConfigFile } from './paths.ts'
 import { loadSecrets, saveSecrets } from './secrets.ts'
-import { collectSecrets } from '../shared/secrets-crypto.ts'
+import { collectSecrets, mergeSecrets, redactSecrets } from '../shared/secrets-crypto.ts'
 import { defaultAppData, sanitizeAppData } from '../shared/store-doc.ts'
 import type { AppData } from '../shared/types.ts'
 
@@ -42,9 +42,7 @@ export class ConfigStore {
     // 合并密钥。老版本把 apiKey 写在 config.json 里 —— 那里的值作为迁移来源保留，
     // 下一次 save 会把它挪进 secrets.json 并从 config.json 抹掉。
     const secrets = loadSecrets()
-    for (const g of doc.groups) {
-      if (secrets[g.id]) g.apiKey = secrets[g.id]
-    }
+    mergeSecrets(doc.groups, secrets)
 
     this.data = doc
     return structuredClone(this.data)
@@ -56,7 +54,7 @@ export class ConfigStore {
     // 拆分：密钥进 secrets.json，config.json 里只留空串
     saveSecrets(collectSecrets(clean.groups))
 
-    const forDisk: AppData = { ...clean, groups: clean.groups.map((g) => ({ ...g, apiKey: '' })) }
+    const forDisk: AppData = { ...clean, groups: redactSecrets(clean.groups) }
 
     const dir = getConfigDir()
     const file = getConfigFile()

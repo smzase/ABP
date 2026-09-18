@@ -1,12 +1,23 @@
 import { dialog, ipcMain, shell, BrowserWindow } from 'electron'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import type { AppData, IpcChannels, ProxySettings, PublishPayload } from '../shared/types.ts'
+import type {
+  AppData,
+  IpcChannels,
+  LocalPublishPayload,
+  MikanSearchKind,
+  ProxySettings,
+  PublishPayload,
+  PublishSite,
+  SiteAccountConfig
+} from '../shared/types.ts'
 import { ConfigStore } from './store.ts'
 import { getConfigDir } from './paths.ts'
 import { addTorrent, removeTorrent } from './torrents.ts'
 import * as anibt from './anibt.ts'
 import { applyProxy } from './proxy.ts'
+import { checkSite, publishLocal, removeArchive, searchMikan, testSiteConnection } from './local-publish.ts'
+import { clearSiteCookies, getDmhyCaptcha, loginSiteAccount, openSiteLogin } from './site-login.ts'
 
 /**
  * IPC 注册。新增通道的固定动作：
@@ -89,15 +100,22 @@ export function registerIpc(store: ConfigStore): void {
   handle('anibt:deleteRelease', (apiKey: string, releaseId: string) => anibt.deleteRelease(apiKey, releaseId))
   handle('anibt:deletionStatus', (apiKey: string, releaseId: string) => anibt.deletionStatus(apiKey, releaseId))
 
+  // ---------- 备用本地直发 / 站点登录 ----------
+  handle('local:publish', (payload: LocalPublishPayload) => publishLocal(payload, store.load()))
+  handle('local:removeArchive', (recordId: string) => removeArchive(recordId))
+  handle('site:login', (groupId: string, site: PublishSite, account: SiteAccountConfig, captchaCode: string) =>
+    loginSiteAccount(groupId, site, account, captchaCode)
+  )
+  handle('site:openLogin', (groupId: string, site: PublishSite, account: SiteAccountConfig) =>
+    openSiteLogin(BrowserWindow.getFocusedWindow(), groupId, site, account)
+  )
+  handle('site:dmhyCaptcha', (groupId: string, account: SiteAccountConfig) => getDmhyCaptcha(groupId, account))
+  handle('site:clearCookies', (groupId: string, site: PublishSite) => clearSiteCookies(groupId, site))
+  handle('site:check', (site: PublishSite, account: SiteAccountConfig) => checkSite(site, account))
+  handle('mikan:search', (kind: MikanSearchKind, query: string) => searchMikan(kind, query))
+
   // ---------- 代理 / 繁化姬 ----------
   handle('proxy:apply', (proxy: ProxySettings) => applyProxy(proxy))
-  handle('proxy:test', async (proxy: ProxySettings) => {
-    // 测试：临时应用传入的代理配置，测完恢复当前保存的配置
-    const saved = store.load().settings.proxy
-    await applyProxy(proxy)
-    const result = await anibt.proxyTest()
-    await applyProxy(saved)
-    return result
-  })
+  handle('proxy:testSite', (site: PublishSite) => testSiteConnection(site))
   handle('zhconvert:traditional', (text: string) => anibt.zhconvertTraditional(text))
 }

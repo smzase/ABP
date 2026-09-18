@@ -35,6 +35,8 @@ $env:ELECTRON_RUN_AS_NODE=$null; $env:NODE_OPTIONS=""
   IPC 序列化 `plain.ts`、发布前体检 `publish-validate.ts`）
   —— 只用可擦除 TS 语法，node 直接跑单测
 - AniBT API 封装：`src/main/anibt.ts`
+- 本地直发：`src/main/local-publish.ts`；隔离网页登录：`src/main/site-login.ts`；
+  Markdown 格式转换：`src/shared/description-format.ts`
 - 配置目录规则：`src/main/paths.ts`（Win: `Documents/AniBT Publish`）
   - `config.json` 普通配置；`secrets.json` 站点 API Key（AES-256-GCM，随文件走）
 - UI 组件：`src/renderer/src/components/ui/`（shadcn 约定手写，无 CLI）
@@ -45,10 +47,31 @@ $env:ELECTRON_RUN_AS_NODE=$null; $env:NODE_OPTIONS=""
 
 ## 红线
 
-- API Key 只存本地 `secrets.json`（加密），不进 `config.json`、不进仓库、不进日志
+- API Key、API Token、账号密码、Cookie、User-Agent 只存本地 `secrets.json`（加密），
+  不进 `config.json`、不进仓库、不进日志
 - `dependencies` 保持为空（全部 bundle，asar 无 node_modules）
 - 不在标题栏写项目名；不改配置目录位置；shared 层不引入 Electron/DOM API
 - 外观默认**浅色**（`#fafafa`）；`index.html` 上不要留 `class="dark"`
+
+## 本地直发约定
+
+- 标题栏 `AniBT / 本地`：AniBT 是默认主发布，本地是备用直发；发布记录按模式隔离。
+- 支持 8 站：AniBT、蜜柑计划、Nyaa、动漫花园、末日动漫、AcgnX、萌番组、ACG.RIP。
+  AniBT 用 API Key；蜜柑用 MikanHash Token；Nyaa 仅使用账号密码调用 `/api/upload`
+  Basic Auth API，不保留网页登录 Cookie 后备；动漫花园/萌番组支持账号密码登录、隔离
+  网页手动登录和按站清 Cookie（动漫花园在应用内获取图片验证码并提交 `/user/login`，只有
+  “打开网页登录”才创建独立窗口；萌番组调用 signin API）；
+  末日动漫/AcgnX 用 UID + API Token；ACG.RIP 用 API URL + `X-API-TOKEN`，输入既支持
+  裸 Token 也支持 `tpx://acg.rip/<token>`，请求前必须剥离前缀。
+- 简介源始终为 Markdown：AniBT/Nyaa 原样；动漫花园/末日动漫/AcgnX/萌番组转 HTML；
+  蜜柑转 BBCode；ACG.RIP 用 `[markdown]` 与 `[/markdown]` 包裹。
+- 蜜柑的 `bangumiId` 不是 bgm.tv 的 `bgmId`；与 `subtitleGroupId` 成对发送。
+  **无视蜜柑文档的可选 `trackers`：请求体永远不发送该字段。**
+- 失败的本地发布会把种子缓存到 `pending-torrents`，供记录页单站/多站重试；
+  全部成功后才删除。
+- 凭据检查不能把“HTTP 可达”冒充认证成功：ACG.RIP、末日动漫、AcgnX 都没有无副作用
+  的独立验证接口，配置完整后显示“实际发布时验证”，禁止向上传端点发送缺字段的空 POST。
+- 代理全量检测八站并发发起、逐行即时回写；单站检测只锁当前行按钮。
 
 ## 反复踩过的坑（详见 AGENTS.md 第 9–23 条）
 

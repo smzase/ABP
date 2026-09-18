@@ -195,6 +195,50 @@ users see in published titles.
   global template (the state is derived by comparing content, so there is no reference
   field that can go stale).
 
+## Local direct publishing
+
+- The title bar has two modes: `anibt` is the primary/default path and uses AniBT's
+  publish API; `local` is the fallback that uploads from the Electron main process.
+  Records are mode-scoped and the records page must not mix the two.
+- Local mode supports exactly eight sites: AniBT, Mikan, Nyaa, DMHY, AcgnX Asia
+  (末日动漫), AcgnX Global, Bangumi.moe (萌番组), and ACG.RIP. Authentication is:
+  AniBT API Key; Mikan MikanHash API Token; Nyaa username/password through its
+  undocumented `/api/upload` Basic Auth API (no web-login/Cookie fallback);
+  DMHY/Bangumi.moe username/password login plus isolated manual browser login and
+  encrypted Cookies; both offer a per-site Cookie clear action. DMHY credential login
+  fetches `common/generate-captcha` into the account editor and submits `POST /user/login`
+  with the user-entered image code; only the explicit manual-login button opens a browser
+  window. Bangumi.moe uses `POST /api/user/signin` and verifies `/api/team/myteam`. Both AcgnX sites use UID +
+  API Token. ACG.RIP uses API URL + `X-API-TOKEN`: accept either the bare token or the
+  `tpx://acg.rip/<token>` form, but always strip the scheme before sending the header.
+  Do not add VCB-Studio as a publishing site.
+- Cookie login windows use a persistent partition derived from the account group id and
+  inherit the configured proxy. CAPTCHA and Cloudflare challenges are completed by the
+  user in that real page. Cookies, usernames/passwords, API keys/tokens and User-Agent
+  are secret fields: they are encrypted in `secrets.json`, never plaintext in
+  `config.json` or logs.
+- The editor source of truth is Markdown. AniBT/Nyaa receive Markdown; DMHY, both AcgnX
+  sites and Bangumi.moe receive HTML from `markdown-it`; Mikan receives BBCode;
+  ACG.RIP receives Markdown wrapped in `[markdown]` / `[/markdown]`.
+- Mikan `bangumiId` is Mikan's own id, not the bgm.tv `bgmId`. Mikan only receives
+  `bangumiId` together with `subtitleGroupId`; `publishGroupId` remains independent.
+  **ABP deliberately never sends Mikan's optional `trackers` field.** Keep this rule
+  in `shared/mikan.ts` and its unit test even though the upstream document lists it.
+- Nyaa follows Nyaapi exclusively: POST `/api/upload` with Basic Auth, multipart
+  fields `torrent` and JSON `torrent_data`. Do not add the legacy web-form Cookie
+  upload back.
+- Credential checks must never treat mere HTTP reachability as verified authentication.
+  ACG.RIP and the two AcgnX endpoints have no side-effect-free credential-check API:
+  after local completeness validation, show them as unverified and defer authentication
+  to the real publish. Never probe an upload endpoint with an empty POST; ACG.RIP returns
+  `param is missing or the value is empty: post`, and AcgnX only reports auth code `105`
+  as part of a complete upload response.
+- Proxy tests launch all eight requests concurrently and update each row as its request
+  settles. A single-site test locks only that site's button; unrelated rows remain usable.
+- Failed local records keep a retry-only torrent copy in the config directory under
+  `pending-torrents` so individual or multi-selected failed sites can be retried.
+  Remove it only after all site results for that record have succeeded.
+
 ## AniBT API essentials (wiki.anibt.net/docs)
 
 - Base URL `https://anibt.net`; auth `Authorization: Bearer <KEY>`;

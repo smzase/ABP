@@ -23,7 +23,12 @@ const items = computed(() =>
   app.data.animeTemplates.map((tpl) => ({
     id: tpl.id,
     label: tpl.names.zh || tpl.names.native || `bgm:${tpl.bgmId ?? '?'}`,
-    sub: [`bgm:${tpl.bgmId ?? '?'}`, groupName(tpl.groupId), tpl.nyaaProxy ? 'Nyaa' : ''].filter(Boolean).join(' · ')
+    sub: [
+      `bgm:${tpl.bgmId ?? '?'}`,
+      tpl.mikanBangumiId ? `Mikan:${tpl.mikanBangumiId}` : '',
+      groupName(tpl.groupId),
+      tpl.nyaaProxy ? 'Nyaa' : ''
+    ].filter(Boolean).join(' · ')
   }))
 )
 

@@ -35,7 +35,12 @@ onMounted(() => {
       <div class="flex min-h-0 flex-1">
         <SideBar v-if="app.loaded" />
         <main class="min-w-0 flex-1 overflow-hidden">
-          <router-view v-if="app.loaded" />
+          <router-view v-if="app.loaded" v-slot="{ Component, route }">
+            <KeepAlive>
+              <component :is="Component" v-if="route.meta.keepAlive" :key="String(route.name)" />
+            </KeepAlive>
+            <component :is="Component" v-if="!route.meta.keepAlive" />
+          </router-view>
         </main>
       </div>
     </div>

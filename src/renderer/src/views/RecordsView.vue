@@ -8,6 +8,9 @@ import RecordRow from '@renderer/components/records/RecordRow.vue'
 import { confirm } from '@renderer/lib/confirm.ts'
 import { cn } from '@renderer/lib/utils.ts'
 import type { PublishRecord } from '@shared/types.ts'
+import { SITE_LABELS } from '@shared/sites.ts'
+import { toPlain } from '@shared/plain.ts'
+import type { PublishSite } from '@shared/types.ts'
 
 /**
  * 发布记录：按番剧分组 / 列表两种展示；懒加载（IntersectionObserver 分批，每批 20 条）。
@@ -24,7 +27,9 @@ const visibleCount = ref(PAGE)
 const sentinel = ref<HTMLElement | null>(null)
 let observer: IntersectionObserver | null = null
 
-const sortedRecords = computed(() => [...app.data.records].sort((a, b) => b.publishedAt - a.publishedAt))
+const sortedRecords = computed(() =>
+  app.data.records.filter((record) => record.mode === app.data.settings.publishMode).sort((a, b) => b.publishedAt - a.publishedAt)
+)
 const visibleRecords = computed(() => sortedRecords.value.slice(0, visibleCount.value))
 
 const groupedByAnime = computed(() => {
@@ -60,17 +65,19 @@ function groupOf(record: PublishRecord) {
 
 function canDelete(record: PublishRecord): boolean {
   const g = groupOf(record)
-  return !!g?.apiKey && g.scopes.includes('releases:delete') && !!record.releaseId && record.status === 'ok'
+  const account = g?.sites.anibt
+  return !!account?.apiKey && account.scopes.includes('releases:delete') && !!record.releaseId && record.status === 'ok'
 }
 
 async function deleteRecord(record: PublishRecord): Promise<void> {
   const g = groupOf(record)
-  if (!g?.apiKey) return
+  const apiKey = g?.sites.anibt.apiKey
+  if (!apiKey) return
   if (!(await confirm({ title: t('records.deleteRelease'), description: t('records.deleteConfirm'), destructive: true })))
     return
   deletingId.value = record.id
   try {
-    const res = await window.api.anibtDeleteRelease(g.apiKey, record.releaseId)
+    const res = await window.api.anibtDeleteRelease(apiKey, record.releaseId)
     if (!res.ok) {
       record.message = res.error
       return
@@ -82,7 +89,7 @@ async function deleteRecord(record: PublishRecord): Promise<void> {
     // 202：轮询删除状态直到 completed / failed
     for (let i = 0; i < 10; i++) {
       await new Promise((r) => setTimeout(r, 2000))
-      const st = await window.api.anibtDeletionStatus(g.apiKey, record.releaseId)
+      const st = await window.api.anibtDeletionStatus(apiKey, record.releaseId)
       if (st.ok && st.state === 'completed') {
         record.status = 'deleted'
         return
@@ -95,6 +102,45 @@ async function deleteRecord(record: PublishRecord): Promise<void> {
     record.message = t('records.deleteStatusPending')
   } finally {
     deletingId.value = null
+  }
+}
+
+const retryingId = ref<string | null>(null)
+
+async function retrySites(record: PublishRecord, sites: PublishSite[]): Promise<void> {
+  retryingId.value = record.id
+  try {
+    const response = await window.api.localPublish(toPlain({
+      recordId: record.id,
+      torrentFileName: record.torrentFileName,
+      groupId: record.groupId,
+      sites,
+      title: record.title,
+      episodeKey: record.episodeKey,
+      resolution: record.resolution,
+      format: record.format,
+      subtitle: record.subtitle,
+      language: [...record.languages],
+      version: record.version,
+      descriptionMd: record.descriptionMd,
+      bgmId: record.bgmId,
+      mikanBangumiId: record.mikanBangumiId,
+      nyaaCategory: record.nyaaCategory,
+      nyaaInformation: record.nyaaInformation,
+      nyaaHidden: record.nyaaHidden,
+      nyaaRemake: record.nyaaRemake
+    }))
+    for (const next of response.sites) {
+      const index = record.siteResults.findIndex((item) => item.site === next.site)
+      if (index >= 0) record.siteResults[index] = next
+      else record.siteResults.push(next)
+    }
+    const failed = record.siteResults.filter((item) => !item.ok)
+    record.status = failed.length ? 'failed' : 'ok'
+    record.message = failed.length ? failed.map((item) => `${SITE_LABELS[item.site]}: ${item.error ?? t('publish.failed')}`).join('；') : undefined
+    if (failed.length === 0) void window.api.removeLocalArchive(record.id)
+  } finally {
+    retryingId.value = null
   }
 }
 </script>
@@ -145,7 +191,9 @@ async function deleteRecord(record: PublishRecord): Promise<void> {
               :record="r"
               :can-delete="canDelete(r)"
               :deleting="deletingId === r.id"
+              :retrying="retryingId === r.id"
               @delete="deleteRecord"
+              @retry="retrySites"
             />
           </div>
         </UiCollapsible>
@@ -159,7 +207,9 @@ async function deleteRecord(record: PublishRecord): Promise<void> {
           :record="r"
           :can-delete="canDelete(r)"
           :deleting="deletingId === r.id"
+          :retrying="retryingId === r.id"
           @delete="deleteRecord"
+          @retry="retrySites"
         />
       </div>
 

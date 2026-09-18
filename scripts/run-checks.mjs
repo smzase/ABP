@@ -29,7 +29,19 @@ import {
   TORRENT_TRACKER_LIMIT
 } from '../src/shared/bencode.ts'
 import { defaultAppData, sanitizeAppData } from '../src/shared/store-doc.ts'
-import { sealSecrets, openSecrets, collectSecrets } from '../src/shared/secrets-crypto.ts'
+import { sealSecrets, openSecrets, collectSecrets, mergeSecrets, redactSecrets } from '../src/shared/secrets-crypto.ts'
+import { formatDescription, markdownToBbcode, markdownToHtml } from '../src/shared/description-format.ts'
+import { buildMikanRequestBody } from '../src/shared/mikan.ts'
+import { PUBLISH_SITES } from '../src/shared/types.ts'
+import {
+  defaultSiteAccount,
+  evaluateDmhyLoginResponse,
+  isSiteConfigured,
+  normalizeAcgripToken,
+  siteConfigurationError,
+  SITE_URLS,
+  unavailableCredentialCheck
+} from '../src/shared/sites.ts'
 import { toPlain } from '../src/shared/plain.ts'
 import { validatePublishPayload } from '../src/shared/publish-validate.ts'
 import { parsePublishResponse } from '../src/shared/publish-response.ts'
@@ -436,6 +448,54 @@ ok('畸形输入：缺 info 的种子', () => {
   assert.throws(() => parseTorrent(te.encode('d8:announce1:aee')), /info/)
 })
 
+console.log('site accounts:')
+ok('空账号不会检查通过，每个站点都有明确的缺失配置提示', () => {
+  for (const site of PUBLISH_SITES) {
+    assert.ok(siteConfigurationError(site, defaultSiteAccount(site)).length > 0, site)
+  }
+})
+ok('Nyaa 仅接受账号密码 API 配置，Cookie 不能替代凭据', () => {
+  const credentials = defaultSiteAccount('nyaa')
+  credentials.username = 'user'
+  credentials.password = 'pass'
+  assert.equal(siteConfigurationError('nyaa', credentials), '')
+  assert.equal(isSiteConfigured('nyaa', credentials), true)
+
+  const cookies = defaultSiteAccount('nyaa')
+  cookies.cookies.push({
+    name: 'session',
+    value: 'value',
+    domain: '.nyaa.si',
+    path: '/',
+    secure: true,
+    httpOnly: true
+  })
+  assert.equal(siteConfigurationError('nyaa', cookies), '请先填写用户名和密码')
+  assert.equal(isSiteConfigured('nyaa', cookies), false)
+})
+ok('ACG.RIP 同时接受 tpx 链接与裸 Token，发送前统一为裸 Token', () => {
+  assert.equal(normalizeAcgripToken('tpx://acg.rip/7233-px2fff6ks9eeeeee'), '7233-px2fff6ks9eeeeee')
+  assert.equal(normalizeAcgripToken('7233-px2fff6ks9eeeeee'), '7233-px2fff6ks9eeeeee')
+  assert.equal(normalizeAcgripToken('  TPX://ACG.RIP/7233-abc  '), '7233-abc')
+})
+ok('动漫花园应用内登录能区分成功、密码错误和验证码错误', () => {
+  assert.deepEqual(evaluateDmhyLoginResponse('<p>登入成功</p>'), { ok: true, message: '登录成功' })
+  assert.deepEqual(evaluateDmhyLoginResponse('帳戶密碼錯誤'), { ok: false, message: '账号或密码错误' })
+  assert.deepEqual(evaluateDmhyLoginResponse('验证码错误'), { ok: false, message: '验证码错误，请重新输入' })
+})
+ok('无只读验证端点的站点只标为未验证，不发送伪发布检查', () => {
+  for (const site of ['mikan', 'acgrip', 'acgnxAsia', 'acgnxGlobal']) {
+    const result = unavailableCredentialCheck(site)
+    assert.equal(result.ok, true, site)
+    assert.equal(result.verified, false, site)
+    assert.match(result.message, /实际发布时验证/, site)
+  }
+})
+ok('代理检测展示的八个站点网址均为 HTTPS', () => {
+  assert.deepEqual(Object.keys(SITE_URLS), [...PUBLISH_SITES])
+  for (const url of Object.values(SITE_URLS)) assert.match(url, /^https:\/\//)
+})
+
 console.log('store-doc:')
 ok('默认值完整', () => {
   const d = defaultAppData()
@@ -444,6 +504,7 @@ ok('默认值完整', () => {
   assert.equal(d.settings.proxy.port, 7890)
   assert.ok(d.settings.subtitleDetect.rules.length > 0)
   assert.ok(d.titleTemplates.length > 0)
+  assert.equal(d.settings.publishMode, 'anibt')
 })
 ok('损坏输入回退默认', () => {
   assert.deepEqual(sanitizeAppData(null), defaultAppData())
@@ -463,8 +524,12 @@ ok('部分字段合并：保留好的、补全缺的', () => {
   assert.equal(out.settings.proxy.host, '127.0.0.1')
   assert.equal(out.groups.length, 1)
   assert.equal(out.groups[0].name, '组A')
+  assert.equal(out.groups[0].sites.anibt.apiKey, 'k')
+  assert.equal(out.groups[0].sites.anibt.enabled, true)
   assert.equal(out.records[0].subtitle, 'EMBEDDED')
   assert.equal(out.records[0].version, 'v1')
+  assert.equal(out.records[0].nyaaCategory, '1_3')
+  assert.equal(sanitizeAppData({ records: [{ nyaaCategory: '1_2' }] }).records[0].nyaaCategory, '1_2')
 })
 ok('深拷贝隔离：改返回值不影响预设词库', () => {
   const a = defaultAppData()
@@ -547,15 +612,55 @@ ok('非字符串 / 空串的 key 被丢掉', () => {
   const env = sealSecrets({ g1: 'ok', g2: '', g3: 123 })
   assert.deepEqual(openSecrets(env), { g1: 'ok' })
 })
-ok('collectSecrets 只抽非空 apiKey', () => {
-  assert.deepEqual(
-    collectSecrets([
-      { id: 'a', apiKey: 'ka' },
-      { id: 'b', apiKey: '' },
-      { id: 'c', apiKey: 'kc' }
-    ]),
-    { a: 'ka', c: 'kc' }
-  )
+ok('多站点敏感字段抽离、Nyaa 旧 Cookie 丢弃、其余字段可还原', () => {
+  const doc = sanitizeAppData({ groups: [{ id: 'a', name: 'A', apiKey: 'legacy-key' }] })
+  const group = doc.groups[0]
+  group.sites.mikan.apiToken = 'mikan-token'
+  group.sites.nyaa.username = 'name'
+  group.sites.nyaa.password = 'pass'
+  group.sites.dmhy.cookies = [{ name: 'session', value: 'cookie', domain: '.dmhy.org', path: '/', secure: true, httpOnly: true }]
+  const secrets = collectSecrets(doc.groups)
+  assert.equal(secrets['a/anibt/apiKey'], 'legacy-key')
+  assert.equal(secrets['a/mikan/apiToken'], 'mikan-token')
+  assert.equal(secrets['a/nyaa/cookies'], undefined)
+  assert.ok(secrets['a/dmhy/cookies'].includes('cookie'))
+  const redacted = redactSecrets(doc.groups)
+  assert.equal(redacted[0].sites.anibt.apiKey, '')
+  assert.equal(redacted[0].sites.nyaa.password, '')
+  assert.deepEqual(redacted[0].sites.dmhy.cookies, [])
+  secrets['a/nyaa/cookies'] = JSON.stringify([{ name: 'legacy', value: 'old' }])
+  mergeSecrets(redacted, secrets)
+  assert.equal(redacted[0].sites.mikan.apiToken, 'mikan-token')
+  assert.equal(redacted[0].sites.dmhy.cookies[0].value, 'cookie')
+  assert.deepEqual(redacted[0].sites.nyaa.cookies, [])
+})
+
+console.log('description formats:')
+ok('markdown-it 转 HTML，结构保留且原始 HTML 不透传', () => {
+  const html = markdownToHtml('---\n\n**bold** [link](https://example.com) <script>x</script>')
+  assert.match(html, /<hr>/)
+  assert.match(html, /<strong>bold<\/strong>/)
+  assert.match(html, /href="https:\/\/example.com"/)
+  assert.ok(!html.includes('<script>'))
+})
+ok('Markdown 转蜜柑 BBCode 覆盖分隔线、粗体、链接和图片', () => {
+  const bbcode = markdownToBbcode('---\n\n**bold** [link](https://example.com)\n\n![](https://example.com/a.jpg)')
+  assert.match(bbcode, /\[hr\]/)
+  assert.match(bbcode, /\[b\]bold\[\/b\]/)
+  assert.match(bbcode, /\[url=https:\/\/example.com\]link\[\/url\]/)
+  assert.match(bbcode, /\[img\]https:\/\/example.com\/a.jpg\[\/img\]/)
+})
+ok('ACG.RIP 使用 markdown 包裹；Mikan payload 永不含 trackers', () => {
+  assert.equal(formatDescription('acgrip', 'hello'), '[markdown]\n\nhello\n\n[/markdown]')
+  const body = buildMikanRequestBody({
+    title: 'T', torrentBase64: 'AA==', descriptionBbcode: '[b]x[/b]',
+    bangumiId: 3599, subtitleGroupId: 1208, publishGroupId: 984
+  })
+  assert.deepEqual(body, {
+    name: 'T', torrentBase64: 'AA==', description: '[b]x[/b]',
+    bangumiId: 3599, subtitleGroupId: 1208, publishGroupId: 984
+  })
+  assert.equal(Object.hasOwn(body, 'trackers'), false)
 })
 
 console.log(`\n全部通过：${passed} 项`)

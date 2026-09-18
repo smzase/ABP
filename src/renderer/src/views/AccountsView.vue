@@ -1,47 +1,47 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { Pencil, Plus, Trash2, X } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
-import { Plus, Pencil, Trash2, Loader2, CheckCircle2, XCircle, KeyRound } from '@lucide/vue'
 import { useAppStore } from '@renderer/stores/app.ts'
 import { genId } from '@renderer/lib/utils.ts'
+import { confirm } from '@renderer/lib/confirm.ts'
+import { defaultSiteAccounts, isSiteConfigured, SITE_LABELS } from '@shared/sites.ts'
+import { PUBLISH_SITES, type GroupAccount, type PublishSite } from '@shared/types.ts'
+import SiteAccountEditor from '@renderer/components/accounts/SiteAccountEditor.vue'
+import UiBadge from '@renderer/components/ui/UiBadge.vue'
 import UiButton from '@renderer/components/ui/UiButton.vue'
+import UiCard from '@renderer/components/ui/UiCard.vue'
+import UiDialog from '@renderer/components/ui/UiDialog.vue'
 import UiInput from '@renderer/components/ui/UiInput.vue'
 import UiLabel from '@renderer/components/ui/UiLabel.vue'
-import UiCard from '@renderer/components/ui/UiCard.vue'
-import UiBadge from '@renderer/components/ui/UiBadge.vue'
-import UiDialog from '@renderer/components/ui/UiDialog.vue'
-import { confirm } from '@renderer/lib/confirm.ts'
-import type { GroupAccount } from '@shared/types.ts'
+import { cn } from '@renderer/lib/utils.ts'
 
-/**
- * 站点账号：先创建「组」，再给组填 API Key，可「检查」验证 Key（whoami + scopes）。
- */
 const { t } = useI18n()
 const app = useAppStore()
-
 const addOpen = ref(false)
 const newGroupName = ref('')
 const renameOpen = ref(false)
 const renameId = ref<string | null>(null)
 const renameValue = ref('')
-
-const checkingId = ref<string | null>(null)
-const checkMsg = ref<Record<string, { ok: boolean; text: string }>>({})
+const editorOpen = ref(false)
+const editingId = ref<string | null>(null)
+const activeSite = ref<PublishSite>('anibt')
+const editingGroup = computed(() => app.data.groups.find((group) => group.id === editingId.value))
 
 function addGroup(): void {
   const name = newGroupName.value.trim()
   if (!name) return
-  app.data.groups.push({
-    id: genId(),
-    name,
-    apiKey: '',
-    slug: '',
-    scopes: [],
-    status: '',
-    lastCheckedAt: null
-  })
+  const group: GroupAccount = { id: genId(), name, sites: defaultSiteAccounts() }
+  app.data.groups.push(group)
   newGroupName.value = ''
   addOpen.value = false
+  openEditor(group)
+}
+
+function openEditor(group: GroupAccount): void {
+  editingId.value = group.id
+  activeSite.value = 'anibt'
+  editorOpen.value = true
 }
 
 function beginRename(group: GroupAccount): void {
@@ -51,75 +51,25 @@ function beginRename(group: GroupAccount): void {
 }
 
 function saveRename(): void {
+  const group = app.data.groups.find((item) => item.id === renameId.value)
   const name = renameValue.value.trim()
-  const group = renameId.value ? app.data.groups.find((x) => x.id === renameId.value) : undefined
   if (!group || !name) return
   group.name = name
   renameOpen.value = false
-  renameId.value = null
 }
+
 async function removeGroup(group: GroupAccount): Promise<void> {
   if (!(await confirm({ title: t('accounts.deleteConfirm'), destructive: true }))) return
-  const idx = app.data.groups.findIndex((g) => g.id === group.id)
-  if (idx >= 0) app.data.groups.splice(idx, 1)
+  const index = app.data.groups.findIndex((item) => item.id === group.id)
+  if (index >= 0) app.data.groups.splice(index, 1)
 }
 
-/** 输入时原样存，别在每次按键上 trim —— 那会让人打不进空格、光标乱跳。失焦再清理 */
-function patchKey(group: GroupAccount, v: string): void {
-  const g = app.data.groups.find((x) => x.id === group.id)
-  if (g) g.apiKey = v
+function siteEnabled(group: GroupAccount, site: PublishSite): boolean {
+  return (site === 'anibt' && app.data.settings.publishMode === 'anibt') || group.sites[site].enabled
 }
 
-function trimKey(group: GroupAccount): void {
-  const g = app.data.groups.find((x) => x.id === group.id)
-  if (g) g.apiKey = g.apiKey.trim()
-}
-
-function usedByCount(groupId: string): number {
-  return app.data.animeTemplates.filter((x) => x.groupId === groupId).length
-}
-
-/** 检查：whoami 确认 Key 可用，groupMe 拿 slug/scopes/status */
-async function check(group: GroupAccount): Promise<void> {
-  if (!group.apiKey) {
-    checkMsg.value[group.id] = { ok: false, text: t('accounts.keyEmpty') }
-    return
-  }
-  checkingId.value = group.id
-  delete checkMsg.value[group.id]
-  try {
-    const me = await window.api.anibtGroupMe(group.apiKey)
-    if (me.ok && me.data) {
-      const g = app.data.groups.find((x) => x.id === group.id)
-      if (g) {
-        g.slug = me.data.slug
-        g.scopes = me.data.scopes ?? []
-        g.status = me.data.status
-        g.lastCheckedAt = Date.now()
-      }
-      checkMsg.value[group.id] = { ok: true, text: t('accounts.checkOk') }
-      return
-    }
-    // groupMe 失败时退回 whoami（至少确认 Key 有效）
-    const who = await window.api.anibtWhoami(group.apiKey)
-    if (who.ok && who.data) {
-      const g = app.data.groups.find((x) => x.id === group.id)
-      if (g) {
-        g.slug = who.data.groupSlug
-        g.scopes = who.data.scopes ?? []
-        g.lastCheckedAt = Date.now()
-      }
-      checkMsg.value[group.id] = { ok: true, text: t('accounts.checkOk') }
-    } else {
-      checkMsg.value[group.id] = { ok: false, text: who.error ?? me.error ?? t('accounts.checkFail') }
-    }
-  } finally {
-    checkingId.value = null
-  }
-}
-
-function formatTime(ts: number | null): string {
-  return ts ? new Date(ts).toLocaleString() : t('accounts.never')
+function enabledCount(group: GroupAccount): number {
+  return PUBLISH_SITES.filter((site) => siteEnabled(group, site)).length
 }
 </script>
 
@@ -127,94 +77,49 @@ function formatTime(ts: number | null): string {
   <div class="h-full overflow-y-auto p-4">
     <div class="mb-4 flex items-center justify-between">
       <h2 class="text-lg font-semibold">{{ t('nav.accounts') }}</h2>
-      <UiButton size="sm" @click="addOpen = true">
-        <Plus class="h-4 w-4" /> {{ t('accounts.addGroup') }}
-      </UiButton>
+      <UiButton size="sm" @click="addOpen = true"><Plus class="h-4 w-4" /> {{ t('accounts.addGroup') }}</UiButton>
     </div>
 
     <div class="grid grid-cols-1 gap-3 xl:grid-cols-2">
-      <UiCard v-for="group in app.data.groups" :key="group.id" class="p-4">
-        <div class="mb-3 flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <span class="font-medium">{{ group.name }}</span>
-            <UiBadge v-if="group.slug" variant="secondary">{{ group.slug }}</UiBadge>
-            <UiBadge v-if="group.status" :variant="group.status.toLowerCase() === 'active' ? 'default' : 'destructive'">
-              {{ group.status }}
-            </UiBadge>
-            <UiBadge v-if="usedByCount(group.id) > 0" variant="outline">
-              {{ usedByCount(group.id) }} {{ t('accounts.usedBy') }}
-            </UiBadge>
-          </div>
+      <UiCard v-for="group in app.data.groups" :key="group.id" class="cursor-pointer p-4 hover:border-primary/40" @click="openEditor(group)">
+        <div class="mb-3 flex items-center justify-between gap-3">
+          <div class="min-w-0"><div class="truncate font-medium">{{ group.name }}</div><div class="text-xs text-muted-foreground">{{ t('accounts.enabledCount', { count: enabledCount(group) }) }}</div></div>
           <div class="flex items-center gap-1">
-            <UiButton variant="ghost" size="icon" :title="t('common.edit')" @click="beginRename(group)">
-              <Pencil class="h-4 w-4" />
-            </UiButton>
-            <UiButton variant="ghost" size="icon" :title="t('common.delete')" @click="removeGroup(group)">
-              <Trash2 class="h-4 w-4 text-destructive" />
-            </UiButton>
+            <UiButton variant="ghost" size="icon" :title="t('common.edit')" @click.stop="beginRename(group)"><Pencil class="h-4 w-4" /></UiButton>
+            <UiButton variant="ghost" size="icon" :title="t('common.delete')" @click.stop="removeGroup(group)"><Trash2 class="h-4 w-4 text-destructive" /></UiButton>
           </div>
         </div>
-
-        <div class="flex flex-col gap-2">
-          <UiLabel class="flex items-center gap-1.5">
-            <KeyRound class="h-3.5 w-3.5" /> {{ t('accounts.apiKey') }}
-          </UiLabel>
-          <div class="flex gap-2">
-            <UiInput
-              :model-value="group.apiKey"
-              type="password"
-              class="flex-1 font-mono"
-              :placeholder="t('accounts.apiKeyHint')"
-              @update:model-value="(v: string) => patchKey(group, v)"
-              @blur="trimKey(group)"
-            />
-            <UiButton variant="outline" :disabled="checkingId === group.id" @click="check(group)">
-              <Loader2 v-if="checkingId === group.id" class="h-4 w-4 animate-spin" />
-              {{ checkingId === group.id ? t('accounts.checking') : t('accounts.checkNow') }}
-            </UiButton>
-          </div>
-
-          <div v-if="checkMsg[group.id]" class="flex items-center gap-1.5 text-xs"
-            :class="checkMsg[group.id].ok ? 'text-green-500' : 'text-destructive'">
-            <CheckCircle2 v-if="checkMsg[group.id].ok" class="h-3.5 w-3.5" />
-            <XCircle v-else class="h-3.5 w-3.5" />
-            {{ checkMsg[group.id].text }}
-          </div>
-
-          <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            <span>{{ t('accounts.lastCheck') }}: {{ formatTime(group.lastCheckedAt) }}</span>
-            <span v-if="group.scopes.length > 0" class="flex items-center gap-1">
-              {{ t('accounts.scopes') }}:
-              <UiBadge v-for="s in group.scopes" :key="s" variant="outline">{{ s }}</UiBadge>
-            </span>
-          </div>
+        <div class="flex flex-wrap gap-1.5">
+          <UiBadge v-for="site in PUBLISH_SITES" :key="site" :variant="siteEnabled(group, site) ? (isSiteConfigured(site, group.sites[site]) ? 'default' : 'outline') : 'secondary'" :class="!siteEnabled(group, site) ? 'opacity-50' : undefined">
+            {{ SITE_LABELS[site] }} · {{ siteEnabled(group, site) ? (isSiteConfigured(site, group.sites[site]) ? t('accounts.configured') : t('accounts.notConfigured')) : t('accounts.disabled') }}
+          </UiBadge>
         </div>
       </UiCard>
-
-      <div v-if="app.data.groups.length === 0" class="col-span-full py-16 text-center text-sm text-muted-foreground">
-        {{ t('common.empty') }}
-      </div>
+      <button v-if="app.data.groups.length === 0" class="col-span-full flex min-h-40 cursor-pointer flex-col items-center justify-center gap-2 rounded-md border border-dashed text-muted-foreground hover:border-primary/50 hover:text-foreground" @click="addOpen = true">
+        <Plus class="h-5 w-5" />{{ t('accounts.addGroup') }}
+      </button>
     </div>
 
-    <UiDialog v-model:open="renameOpen" :title="t('accounts.renameGroup')">
-      <div class="flex flex-col gap-3">
-        <UiLabel>{{ t('accounts.groupName') }}</UiLabel>
-        <UiInput v-model="renameValue" :placeholder="t('accounts.renameHint')" @keydown.enter="saveRename" />
-        <div class="flex justify-end gap-2">
-          <UiButton variant="outline" @click="renameOpen = false">{{ t('common.cancel') }}</UiButton>
-          <UiButton :disabled="!renameValue.trim()" @click="saveRename">{{ t('common.save') }}</UiButton>
-        </div>
-      </div>
-    </UiDialog>
     <UiDialog v-model:open="addOpen" :title="t('accounts.addGroup')">
-      <div class="flex flex-col gap-3">
-        <UiLabel>{{ t('accounts.groupName') }}</UiLabel>
-        <UiInput v-model="newGroupName" placeholder="三明治摆烂组" @keydown.enter="addGroup" />
-        <div class="flex justify-end gap-2">
-          <UiButton variant="outline" @click="addOpen = false">{{ t('common.cancel') }}</UiButton>
-          <UiButton :disabled="!newGroupName.trim()" @click="addGroup">{{ t('common.add') }}</UiButton>
-        </div>
+      <div class="flex flex-col gap-1.5"><UiLabel>{{ t('accounts.groupName') }}</UiLabel><UiInput v-model="newGroupName" placeholder="三明治摆烂组" @keydown.enter="addGroup" /></div>
+      <div class="flex justify-end gap-2"><UiButton variant="outline" @click="addOpen = false">{{ t('common.cancel') }}</UiButton><UiButton :disabled="!newGroupName.trim()" @click="addGroup">{{ t('common.add') }}</UiButton></div>
+    </UiDialog>
+
+    <UiDialog v-model:open="renameOpen" :title="t('accounts.renameGroup')">
+      <UiInput v-model="renameValue" :placeholder="t('accounts.renameHint')" @keydown.enter="saveRename" />
+      <div class="flex justify-end gap-2"><UiButton variant="outline" @click="renameOpen = false">{{ t('common.cancel') }}</UiButton><UiButton :disabled="!renameValue.trim()" @click="saveRename">{{ t('common.save') }}</UiButton></div>
+    </UiDialog>
+
+    <UiDialog v-model:open="editorOpen" :title="editingGroup?.name" class="max-w-5xl">
+      <div v-if="editingGroup" class="grid min-h-[480px] grid-cols-[180px_minmax(0,1fr)] gap-4">
+        <nav class="flex flex-col gap-1 border-r pr-3">
+          <button v-for="site in PUBLISH_SITES" :key="site" :data-account-site="site" class="flex cursor-pointer items-center justify-between rounded-md px-3 py-2 text-left text-sm" :class="cn(activeSite === site ? 'bg-primary/10 font-medium text-primary' : 'hover:bg-accent')" @click="activeSite = site">
+            <span>{{ SITE_LABELS[site] }}</span><span class="h-2 w-2 rounded-full" :class="editingGroup.sites[site].enabled ? 'bg-green-500' : 'bg-muted-foreground/30'" />
+          </button>
+        </nav>
+        <div class="min-w-0 overflow-y-auto pr-1"><SiteAccountEditor :group-id="editingGroup.id" :site="activeSite" /></div>
       </div>
+      <div class="flex justify-end"><UiButton variant="outline" @click="editorOpen = false"><X class="h-4 w-4" />{{ t('common.close') }}</UiButton></div>
     </UiDialog>
   </div>
 </template>

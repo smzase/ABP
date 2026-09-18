@@ -54,7 +54,19 @@ watch(bgmIdText, (v) => {
   touch()
 })
 
-const missingBgmId = computed(() => tpl.value?.bgmId === null || tpl.value?.bgmId === undefined)
+const mikanBangumiIdText = ref(tpl.value?.mikanBangumiId != null ? String(tpl.value.mikanBangumiId) : '')
+watch(mikanBangumiIdText, (value) => {
+  if (!tpl.value) return
+  const parsed = Number(value.trim())
+  tpl.value.mikanBangumiId = value.trim() !== '' && Number.isInteger(parsed) && parsed > 0 ? parsed : null
+  touch()
+})
+
+const selectedGroup = computed(() => app.data.groups.find((group) => group.id === tpl.value?.groupId))
+const needsBgmId = computed(() => app.data.settings.publishMode === 'anibt' || selectedGroup.value?.sites.anibt.enabled === true)
+const needsMikanId = computed(() => app.data.settings.publishMode === 'local' && selectedGroup.value?.sites.mikan.enabled === true)
+const missingBgmId = computed(() => needsBgmId.value && (tpl.value?.bgmId === null || tpl.value?.bgmId === undefined))
+const missingMikanId = computed(() => needsMikanId.value && (tpl.value?.mikanBangumiId === null || tpl.value?.mikanBangumiId === undefined))
 const missingGroup = computed(() => !tpl.value?.groupId)
 
 function patchNames(key: 'zh' | 'zhTw' | 'romaji' | 'en' | 'native', v: string): void {
@@ -99,6 +111,7 @@ const EXAMPLE_ROWS: Array<{ key: FilenameExampleKey; labelKey: string }> = [
 ]
 
 const filenameExamplesOpen = ref(false)
+const nyaaMoreOpen = ref(false)
 
 function exampleValue(key: FilenameExampleKey): AnimeFilenameExample {
   return tpl.value?.filenameExamples?.[key] ?? EMPTY_EXAMPLE
@@ -241,16 +254,26 @@ async function remove(): Promise<void> {
   <div v-if="tpl" class="flex min-w-0 flex-col gap-4 p-4">
     <!-- ① 信息 -->
     <UiCard class="p-4">
-      <div class="mb-3 flex items-center justify-between">
+      <div class="mb-3 flex items-center justify-between gap-3">
         <h3 class="font-medium">{{ t('tpl.info') }}</h3>
-        <UiButton variant="destructive" size="sm" @click="remove">
-          <Trash2 class="h-3.5 w-3.5" /> {{ t('common.delete') }}
-        </UiButton>
+        <div class="ml-auto flex items-center gap-2">
+          <UiSelect
+            :model-value="tpl.groupId"
+            class="w-56"
+            :class="cn(missingGroup && 'border-destructive')"
+            :placeholder="t('tpl.needGroup')"
+            @update:model-value="(v: string) => { if (tpl) { tpl.groupId = v; touch() } }"
+          >
+            <UiSelectItem v-for="g in app.data.groups" :key="g.id" :value="g.id">{{ g.name }}</UiSelectItem>
+            <div v-if="app.data.groups.length === 0" class="px-2 py-1.5 text-xs text-muted-foreground">{{ t('common.empty') }}</div>
+          </UiSelect>
+          <UiButton variant="destructive" size="sm" @click="remove"><Trash2 class="h-3.5 w-3.5" /> {{ t('common.delete') }}</UiButton>
+        </div>
       </div>
 
       <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
         <div class="flex flex-col gap-1.5">
-          <UiLabel>{{ t('tpl.bgmId') }} *</UiLabel>
+          <UiLabel>{{ t('tpl.bgmId') }} <template v-if="needsBgmId">*</template></UiLabel>
           <div class="relative">
             <UiInput v-model="bgmIdText" :class="cn(missingBgmId && 'border-destructive')" placeholder="400602" />
             <UiTooltip v-if="missingBgmId" :content="t('tpl.needBgmId')">
@@ -260,18 +283,13 @@ async function remove(): Promise<void> {
         </div>
 
         <div class="flex flex-col gap-1.5">
-          <UiLabel>{{ t('tpl.publishGroup') }} *</UiLabel>
-          <UiSelect
-            :model-value="tpl.groupId"
-            :class="cn(missingGroup && 'border-destructive')"
-            :placeholder="t('tpl.needGroup')"
-            @update:model-value="(v: string) => { if (tpl) { tpl.groupId = v; touch() } }"
-          >
-            <UiSelectItem v-for="g in app.data.groups" :key="g.id" :value="g.id">{{ g.name }}</UiSelectItem>
-            <div v-if="app.data.groups.length === 0" class="px-2 py-1.5 text-xs text-muted-foreground">
-              {{ t('common.empty') }}
-            </div>
-          </UiSelect>
+          <UiLabel>{{ t('tpl.mikanBangumiId') }} <template v-if="needsMikanId">*</template></UiLabel>
+          <div class="relative">
+            <UiInput v-model="mikanBangumiIdText" :class="cn(missingMikanId && 'border-destructive')" placeholder="3599" />
+            <UiTooltip v-if="missingMikanId" :content="t('tpl.needMikanBangumiId')">
+              <AlertCircle class="absolute right-2.5 top-2.5 h-4 w-4 text-destructive" />
+            </UiTooltip>
+          </div>
         </div>
 
         <div class="flex flex-col gap-1.5">
@@ -320,9 +338,9 @@ async function remove(): Promise<void> {
         </div>
 </div>
 
-      <!-- Nyaa 固定在折叠头部左侧；示例按钮固定在右侧，展开后头部不会移动。 -->
-      <CollapsibleRoot v-model:open="filenameExamplesOpen" class="mt-3 w-full" data-probe="filename-examples">
-        <div class="flex items-center justify-between gap-2" data-probe="filename-examples-header">
+      <!-- Nyaa 代发与更多项固定在未展开的第一行。 -->
+      <CollapsibleRoot v-model:open="nyaaMoreOpen" class="mt-3 w-full" data-probe="nyaa-more">
+        <div class="flex items-center justify-end gap-2">
           <UiTooltip :content="t('tpl.nyaaProxyHint')">
             <label class="flex w-fit cursor-pointer items-center gap-2 text-sm" data-probe="nyaa-proxy-fixed">
               <UiSwitch
@@ -333,18 +351,43 @@ async function remove(): Promise<void> {
             </label>
           </UiTooltip>
           <CollapsibleTrigger
-            class="ml-auto flex w-fit cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium hover:bg-accent [&[data-state=open]>svg]:rotate-180"
-            data-probe="filename-examples-trigger"
+            class="flex w-fit cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium hover:bg-accent [&[data-state=open]>svg]:rotate-180"
+            data-probe="nyaa-more-trigger"
           >
             <ChevronDown class="h-4 w-4 shrink-0 transition-transform" />
-            {{ t('tpl.filenameExamples') }}
+            {{ t('tpl.nyaaMore') }}
           </CollapsibleTrigger>
         </div>
-
         <CollapsibleContent
           class="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down"
-          data-probe="filename-examples-content"
         >
+          <div class="mt-2 flex flex-col gap-2 rounded-md border bg-muted/20 p-3">
+            <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto]">
+              <div class="flex flex-col gap-1.5"><UiLabel>Information</UiLabel><UiInput v-model="tpl.nyaaInformation" /></div>
+              <label class="flex cursor-pointer items-center gap-2 self-end pb-2 text-sm" data-probe="nyaa-hidden">
+                <UiSwitch v-model="tpl.nyaaHidden" />{{ t('tpl.hiddenTorrent') }}
+              </label>
+              <UiTooltip :content="t('tpl.remakeHint')">
+                <label class="flex cursor-pointer items-center gap-2 self-end pb-2 text-sm" data-probe="nyaa-remake">
+                  <UiSwitch v-model="tpl.nyaaRemake" />{{ t('tpl.remakeTorrent') }}
+                </label>
+              </UiTooltip>
+            </div>
+            <p class="text-left text-xs text-muted-foreground" data-probe="nyaa-local-only-note">
+              {{ t('tpl.nyaaLocalOnlyNote') }}
+            </p>
+          </div>
+        </CollapsibleContent>
+      </CollapsibleRoot>
+
+      <!-- 种子名示例下移为独立的一整排。 -->
+      <CollapsibleRoot v-model:open="filenameExamplesOpen" class="mt-2 w-full" data-probe="filename-examples">
+        <div class="flex justify-end" data-probe="filename-examples-header">
+          <CollapsibleTrigger class="flex w-fit cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-sm font-medium hover:bg-accent [&[data-state=open]>svg]:rotate-180" data-probe="filename-examples-trigger">
+            <ChevronDown class="h-4 w-4 shrink-0 transition-transform" />{{ t('tpl.filenameExamples') }}
+          </CollapsibleTrigger>
+        </div>
+        <CollapsibleContent class="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down" data-probe="filename-examples-content">
           <div class="px-2 py-1">
             <div class="flex flex-col gap-4">
               <div

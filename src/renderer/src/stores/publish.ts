@@ -23,6 +23,7 @@ import {
 import { i18n } from '@renderer/i18n/index.ts'
 import { genId } from '@renderer/lib/utils.ts'
 import { useAppStore } from './app.ts'
+import { enabledSites, isSiteConfigured } from '@shared/sites.ts'
 
 /** 校验问题 → 人话。store 不在组件 setup 作用域里，直接用全局 i18n 实例（和 app store 一个路子） */
 function translateProblem(p: PublishProblem): string {
@@ -248,8 +249,19 @@ export const usePublishStore = defineStore('publish', () => {
     if (!entry.description) entry.description = tpl.descriptionMd
   }
 
-  const canGoFinal = computed(
-    () => entries.value.length > 0 && entries.value.every((e) => e.animeTemplateId !== '')
+  const canGoFinal = computed(() =>
+    entries.value.length > 0 && entries.value.every((entry) => {
+      const template = templateOf(entry)
+      if (!template) return false
+      const group = app.data.groups.find((item) => item.id === template.groupId)
+      if (!group) return false
+      if (app.data.settings.publishMode === 'anibt') return template.bgmId !== null
+      const sites = enabledSites(group)
+      if (sites.length === 0) return false
+      if (sites.includes('anibt') && template.bgmId === null) return false
+      if (sites.includes('mikan') && template.mikanBangumiId === null) return false
+      return true
+    })
   )
 
   /** 发布中：由条目自身推导，切页面回来也不会丢状态 */
@@ -257,33 +269,81 @@ export const usePublishStore = defineStore('publish', () => {
 
   /** 批量发布（串行，避免触发限流） */
   async function publishAll(opts: BatchOptions = batch.value): Promise<void> {
+    const mode = app.data.settings.publishMode
+    if (mode === 'local') {
+      try {
+        // local:publish 在主进程读取账号配置。显式同步一次，避免用户刚改 Token
+        // 就点发布时，500ms 自动保存尚未触发而读到旧配置。
+        await window.api.saveStore(toPlain(app.data))
+      } catch (error) {
+        for (const entry of entries.value.filter((item) => item.publishOk !== true)) {
+          entry.publishOk = false
+          entry.publishMessage = `保存站点配置失败：${String(error)}`
+        }
+        return
+      }
+    }
     for (const entry of entries.value) {
       if (entry.publishOk === true) continue
       const tpl = templateOf(entry)
-      if (!tpl || tpl.bgmId === null) {
+      if (!tpl) {
         entry.publishOk = false
-        entry.publishMessage = '模板缺少 bgmId'
+        entry.publishMessage = '未选择番剧模板'
         continue
       }
       const group = app.data.groups.find((g) => g.id === tpl.groupId)
-      if (!group || !group.apiKey) {
+      if (!group) {
         entry.publishOk = false
-        entry.publishMessage = '发布组未配置 API Key'
+        entry.publishMessage = '未选择发布组'
         continue
+      }
+
+      const localSites = enabledSites(group)
+      if ((mode === 'anibt' || localSites.includes('anibt')) && tpl.bgmId === null) {
+        entry.publishOk = false
+        entry.publishMessage = '启用 AniBT 发布时，模板必须填写 bgmId'
+        continue
+      }
+      if (mode === 'local' && localSites.includes('mikan') && tpl.mikanBangumiId === null) {
+        entry.publishOk = false
+        entry.publishMessage = '启用蜜柑计划发布时，模板必须填写 Mikan bangumiId'
+        continue
+      }
+      if (mode === 'anibt' && !group.sites.anibt.apiKey) {
+        entry.publishOk = false
+        entry.publishMessage = '发布组未配置 AniBT API Key'
+        continue
+      }
+      if (mode === 'local') {
+        if (localSites.length === 0) {
+          entry.publishOk = false
+          entry.publishMessage = '发布组没有启用任何站点'
+          continue
+        }
+        const missing = localSites.filter((site) => !isSiteConfigured(site, group.sites[site]))
+        if (missing.length > 0) {
+          entry.publishOk = false
+          entry.publishMessage = `以下站点尚未完成账号配置：${missing.join(', ')}`
+          continue
+        }
       }
 
       // 发出去之前先本地体检：站点对不合法 body 只回一句「Invalid request body」，
       // 不点名字段。空标题、1440p 这种站点不认的分辨率，在这里就拦下来并说清楚是哪个字段。
-      const problems = validatePublishPayload({
-        title: entry.title,
-        resolution: entry.resolution,
-        format: entry.format,
-        subtitle: entry.subtitleType,
-        language: entry.languages,
-        notes: entry.description,
-        nyaa: entry.nyaa,
-        nyaaCategory: opts.nyaaCategory
-      })
+      const problems = mode === 'anibt' || localSites.includes('anibt')
+        ? validatePublishPayload({
+            title: entry.title,
+            resolution: entry.resolution,
+            format: entry.format,
+            subtitle: entry.subtitleType,
+            language: entry.languages,
+            notes: entry.description,
+            nyaa: mode === 'anibt' && entry.nyaa,
+            nyaaCategory: opts.nyaaCategory
+          })
+        : entry.title.trim()
+          ? []
+          : [{ key: 'publishCheck.titleRequired' }]
       if (problems.length > 0) {
         entry.publishOk = false
         entry.publishMessage = problems.map((p) => translateProblem(p)).join('；')
@@ -298,8 +358,14 @@ export const usePublishStore = defineStore('publish', () => {
         // toPlain 不能省：entry.languages 是 store 里的响应式数组（Proxy），
         // 直接送进 IPC 会被结构化克隆拒绝 ——「An object could not be cloned.」，
         // 而且报错里看不出是哪个字段的锅。见 shared/plain.ts
-        const res = await window.api.anibtPublish(
-          toPlain({
+        const recordId = genId()
+        let publishOk = false
+        let releaseId = ''
+        let previewUrl = ''
+        let publishMessage = ''
+        let siteResults: PublishRecord['siteResults'] = []
+        if (mode === 'anibt') {
+          const res = await window.api.anibtPublish(toPlain({
             torrentToken: entry.torrentToken,
             animeIdType: 'bgm',
             animeId: String(tpl.bgmId),
@@ -314,16 +380,54 @@ export const usePublishStore = defineStore('publish', () => {
             preview: opts.preview,
             nyaa: entry.nyaa,
             nyaaCategory: opts.nyaaCategory,
-            apiKey: group.apiKey
-          })
-        )
-        entry.publishOk = res.ok
-        entry.previewUrl = res.previewUrl ?? ''
-        entry.publishMessage = res.ok ? '' : (res.error?.message ?? '未知错误')
-        if (res.ok) learnEntryExample(entry, tpl)
+            apiKey: group.sites.anibt.apiKey
+          }))
+          publishOk = res.ok
+          releaseId = res.releaseId ?? ''
+          previewUrl = res.previewUrl ?? ''
+          publishMessage = res.ok ? '' : (res.error?.message ?? '未知错误')
+          siteResults = [{
+            site: 'anibt',
+            ok: res.ok,
+            url: res.previewUrl,
+            error: res.error?.message,
+            httpStatus: res.error?.httpStatus
+          }]
+        } else {
+          const res = await window.api.localPublish(toPlain({
+            recordId,
+            torrentToken: entry.torrentToken,
+            torrentFileName: entry.fileName,
+            groupId: group.id,
+            sites: localSites,
+            title: entry.title,
+            episodeKey: entry.episode,
+            resolution: entry.resolution,
+            format: entry.format,
+            subtitle: entry.subtitleType,
+            language: entry.languages,
+            version: entry.version || 'v1',
+            descriptionMd: entry.description,
+            bgmId: tpl.bgmId,
+            mikanBangumiId: tpl.mikanBangumiId,
+            nyaaCategory: opts.nyaaCategory,
+            nyaaInformation: tpl.nyaaInformation,
+            nyaaHidden: tpl.nyaaHidden,
+            nyaaRemake: tpl.nyaaRemake
+          }))
+          publishOk = res.ok
+          siteResults = res.sites
+          publishMessage = res.ok
+            ? ''
+            : (res.sites.filter((item) => !item.ok).map((item) => `${item.site}: ${item.error ?? '失败'}`).join('；') || res.error || '未知错误')
+        }
+        entry.publishOk = publishOk
+        entry.previewUrl = previewUrl
+        entry.publishMessage = publishMessage
+        if (siteResults.some((item) => item.ok)) learnEntryExample(entry, tpl)
         const record: PublishRecord = {
-          id: genId(),
-          releaseId: res.releaseId ?? '',
+          id: recordId,
+          releaseId,
           title: entry.title,
           bgmId: tpl.bgmId,
           animeName: tpl.names.zh || tpl.names.native,
@@ -336,13 +440,25 @@ export const usePublishStore = defineStore('publish', () => {
           subtitle: entry.subtitleType,
           version: entry.version || 'v1',
           preview: opts.preview,
-          nyaa: entry.nyaa,
+          nyaa: mode === 'anibt' && entry.nyaa,
           publishedAt: Date.now(),
-          status: res.ok ? 'ok' : 'failed',
-          message: res.ok ? undefined : res.error?.message
+          status: publishOk ? 'ok' : 'failed',
+          message: entry.publishMessage || undefined,
+          mode,
+          torrentFileName: entry.fileName,
+          descriptionMd: entry.description,
+          mikanBangumiId: tpl.mikanBangumiId,
+          nyaaCategory: opts.nyaaCategory,
+          nyaaInformation: tpl.nyaaInformation,
+          nyaaHidden: tpl.nyaaHidden,
+          nyaaRemake: tpl.nyaaRemake,
+          siteResults
         }
         app.data.records.unshift(record)
-        if (res.ok) void window.api.removeTorrent(entry.torrentToken)
+        if (publishOk) {
+          void window.api.removeTorrent(entry.torrentToken)
+          if (mode === 'local') void window.api.removeLocalArchive(recordId)
+        }
       } catch (err) {
         entry.publishOk = false
         entry.publishMessage = String(err)

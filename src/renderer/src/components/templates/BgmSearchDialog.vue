@@ -72,6 +72,7 @@ async function createFromSearch(item: BgmSearchItem): Promise<void> {
     app.data.animeTemplates.push({
       id: genId(),
       bgmId: item.bgmId,
+      mikanBangumiId: null,
       names: {
         zh: names.nameCn || item.nameCn || '',
         zhTw: '',
@@ -81,6 +82,9 @@ async function createFromSearch(item: BgmSearchItem): Promise<void> {
       },
       groupId: '',
       nyaaProxy: false,
+      nyaaInformation: '',
+      nyaaHidden: false,
+      nyaaRemake: false,
       traditionalizeTitle: false,
       titleTemplates: { simp: '', trad: '', both: '' },
       descriptionMd: '',
@@ -99,9 +103,13 @@ function createFromManual(): void {
   app.data.animeTemplates.push({
     id: genId(),
     bgmId: id,
+    mikanBangumiId: null,
     names: { zh: '', zhTw: '', romaji: '', en: '', native: '' },
     groupId: '',
     nyaaProxy: false,
+    nyaaInformation: '',
+    nyaaHidden: false,
+    nyaaRemake: false,
     traditionalizeTitle: false,
     titleTemplates: { simp: '', trad: '', both: '' },
     descriptionMd: '',

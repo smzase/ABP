@@ -118,6 +118,12 @@ function pressKey(win, keyCode) {
   return wait(250)
 }
 
+function pressShortcut(win, keyCode, modifiers) {
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers })
+  win.webContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers })
+  return wait(350)
+}
+
 async function editMarkdown(win, text) {
   if (!(await waitFor(win, `document.querySelector('.md-editor .cm-content')`))) return false
   await js(win, `(()=>{const e=document.querySelector('.md-editor .cm-content'); e.scrollIntoView({block:'center'}); e.focus()})()`)
@@ -250,6 +256,22 @@ async function run(win) {
 
   // ---------- 外观：默认浅色 ----------
   check('默认浅色模式（html 上没有 .dark）', !(await js(win, `document.documentElement.classList.contains('dark')`)))
+
+  // ---------- 标题栏：主发布默认 AniBT，本地模式可切换并持久化 ----------
+  const modeState = () => js(win, `(()=>{const root=document.querySelector('[data-probe=publish-mode-switch]')
+    if(!root)return null
+    return {anibt:root.querySelector('[data-publish-mode=anibt]')?.className.includes('bg-card'),
+      local:root.querySelector('[data-publish-mode=local]')?.className.includes('bg-card')}})()`)
+  check('标题栏默认选中 AniBT 主发布', (await modeState())?.anibt === true)
+  const titleBarSize = await js(win, `(()=>{const control=document.querySelector('[data-probe=publish-mode-switch]');
+    const bar=control?.parentElement;return {bar:Math.round(bar?.getBoundingClientRect().height||0),
+      control:Math.round(control?.getBoundingClientRect().height||0)}})()`)
+  check('标题栏和发布模式切换已增高', titleBarSize?.bar === 44 && titleBarSize?.control === 32, JSON.stringify(titleBarSize))
+  check('切换到本地直发', await clickElementAt(win, `document.querySelector('[data-publish-mode=local]')`))
+  check('本地模式已选中', await waitFor(win, `document.querySelector('[data-publish-mode=local]')?.className.includes('bg-card')`))
+  check('本地模式已写入配置', await waitFor(win, `window.api.loadStore().then(data=>data.settings.publishMode==='local')`))
+  check('切回 AniBT 主发布', await clickElementAt(win, `document.querySelector('[data-publish-mode=anibt]')`))
+  check('AniBT 模式恢复并写入配置', await waitFor(win, `window.api.loadStore().then(data=>data.settings.publishMode==='anibt')`))
 
   // ---------- 侧边栏：展开时不再浮出重复的导航气泡 ----------
   // 展开态按钮上已经写着「发布 / 番剧模板 / …」，再浮一层同样的字是纯噪音。
@@ -394,34 +416,51 @@ async function run(win) {
   )
   check('番剧标题模板是 textarea', await js(win, `document.querySelectorAll('textarea.font-mono').length >= 1`))
 
-  // ---------- 番剧模板：种子名示例的固定头部与两层布局 ----------
+  // ---------- 番剧模板：Nyaa 更多项与种子名示例是两条独立折叠行 ----------
   await js(win, "document.querySelector('[data-probe=filename-examples]')?.scrollIntoView({block:'center'})")
   await wait(300)
   const examplesCollapsed = await js(
     win,
-    "(()=>{const root=document.querySelector('[data-probe=filename-examples]');" +
-      "const header=root?.querySelector('[data-probe=filename-examples-header]');" +
-      "const nyaa=root?.querySelector('[data-probe=nyaa-proxy-fixed]');" +
-      "const trigger=root?.querySelector('[data-probe=filename-examples-trigger]');" +
-      "const content=root?.querySelector('[data-probe=filename-examples-content]');" +
-      "if(!root||!header||!nyaa||!trigger)return null;" +
-      "const nr=nyaa.getBoundingClientRect(),tr=trigger.getBoundingClientRect();" +
-      "return {state:trigger.getAttribute('data-state'),icon:!!trigger.querySelector('svg')," +
-      "sameHeader:header.contains(nyaa)&&header.contains(trigger)," +
+    "(()=>{const examples=document.querySelector('[data-probe=filename-examples]');" +
+      "const exampleTrigger=document.querySelector('[data-probe=filename-examples-trigger]');" +
+      "const nyaaRoot=document.querySelector('[data-probe=nyaa-more]');" +
+      "const nyaa=document.querySelector('[data-probe=nyaa-proxy-fixed]');" +
+      "const nyaaTrigger=document.querySelector('[data-probe=nyaa-more-trigger]');" +
+      "if(!examples||!exampleTrigger||!nyaaRoot||!nyaa||!nyaaTrigger)return null;" +
+      "const nr=nyaa.getBoundingClientRect(),tr=nyaaTrigger.getBoundingClientRect();" +
+      "return {exampleState:exampleTrigger.getAttribute('data-state'),exampleIcon:!!exampleTrigger.querySelector('svg')," +
+      "nyaaState:nyaaTrigger.getAttribute('data-state'),nyaaIcon:!!nyaaTrigger.querySelector('svg')," +
       "sameRow:Math.abs((nr.top+nr.height/2)-(tr.top+tr.height/2))<=2," +
-      "nyaaVisible:nr.width>0&&nr.height>0,nyaaInContent:content?content.contains(nyaa):false}})()"
+      "nyaaVisible:nr.width>0&&nr.height>0,separate:!examples.contains(nyaa)&&!nyaaRoot.contains(examples)}})()"
   )
   check(
-    '种子名示例默认收起，Nyaa 代发仍固定可见',
-    examplesCollapsed && examplesCollapsed.state === 'closed' && examplesCollapsed.nyaaVisible &&
-      examplesCollapsed.sameHeader && examplesCollapsed.sameRow && !examplesCollapsed.nyaaInContent,
+    'Nyaa 更多项默认收起，Nyaa 代发固定在同一行',
+    examplesCollapsed && examplesCollapsed.nyaaState === 'closed' && examplesCollapsed.nyaaVisible &&
+      examplesCollapsed.sameRow && examplesCollapsed.nyaaIcon,
     JSON.stringify(examplesCollapsed)
   )
   check(
-    '「种子名示例」按钮左侧有展开收起图标',
-    examplesCollapsed && examplesCollapsed.icon === true,
+    '种子名示例默认收起且有展开图标，并与 Nyaa 更多项相互独立',
+    examplesCollapsed && examplesCollapsed.exampleState === 'closed' &&
+      examplesCollapsed.exampleIcon === true && examplesCollapsed.separate,
     JSON.stringify(examplesCollapsed)
   )
+  check(
+    '展开 Nyaa 更多项',
+    await clickElementAt(win, "document.querySelector('[data-probe=nyaa-more-trigger]')")
+  )
+  check('Nyaa 更多项使用中文开关名且没有行内英文说明', await waitFor(win,
+    `(()=>{const hidden=document.querySelector('[data-probe=nyaa-hidden]');const remake=document.querySelector('[data-probe=nyaa-remake]');
+      const root=document.querySelector('[data-probe=nyaa-more]');return hidden?.textContent.trim()==='隐藏种子' &&
+        remake?.textContent.trim()==='重制版' && !root?.textContent.includes('This torrent is derived')})()`))
+  check('Nyaa 更多项注明仅供本地发布使用', await js(win,
+    `document.querySelector('[data-probe=nyaa-local-only-note]')?.textContent.includes('该配置仅为本地发布使用')`))
+  check(
+    '重制版英文释义只在悬停提示中显示',
+    (await hoverSelector(win, '[data-probe=nyaa-remake]')) &&
+      (await js(win, `[...document.querySelectorAll('[role=tooltip]')].some(x=>x.textContent.includes('此种子源自其他发布'))`))
+  )
+  await clickElementAt(win, "document.querySelector('[data-probe=nyaa-more-trigger]')")
   await js(win, `document.querySelector('[data-probe=filename-examples-trigger]').scrollIntoView({block:'center',behavior:'instant'})`)
   check(
     '展开「种子名示例」',
@@ -433,7 +472,7 @@ async function run(win) {
     win,
     "(()=>{const root=document.querySelector('[data-probe=filename-examples]');" +
       "const row=root?.querySelector('[data-example-row]');const file=row?.querySelector('[data-example-filename]');" +
-      "const meta=row?.querySelector('[data-example-metadata]');const nyaa=root?.querySelector('[data-probe=nyaa-proxy-fixed]');" +
+      "const meta=row?.querySelector('[data-example-metadata]');const nyaa=document.querySelector('[data-probe=nyaa-proxy-fixed]');" +
       "const content=meta?.closest('[data-state=open]');if(!root||!row||!file||!meta||!nyaa)return null;" +
       "const rr=row.getBoundingClientRect(),fr=file.getBoundingClientRect(),mr=meta.getBoundingClientRect();" +
       "const cells=[...meta.children],tops=cells.map(x=>Math.round(x.getBoundingClientRect().top));" +
@@ -631,6 +670,14 @@ async function run(win) {
     JSON.stringify(overflow)
   )
   check('番剧简介异步编辑器可以输入并实时预览', await editMarkdown(win, 'ABP anime roundtrip'))
+  const longImageUrl = 'https://example.com/images/a-very-long-image-file-name-that-must-remain-visible.jpg'
+  await js(win, `document.querySelector('.md-editor .cm-content')?.focus()`)
+  await win.webContents.insertText(`\n![](${longImageUrl})`)
+  const fullLinkState = await waitFor(
+    win,
+    `(()=>{const e=document.querySelector('.md-editor .cm-content');return e?.textContent.includes(${JSON.stringify(longImageUrl)}) && !e.querySelector('.cm-short-text')})()`
+  )
+  check('Markdown 图片链接始终完整显示，不再替换成省略号', fullLinkState)
   check('番剧简介的异步 v-model 已保存', await waitFor(win,
     `window.api.loadStore().then(data => data.animeTemplates.some(t => t.descriptionMd.includes('ABP anime roundtrip')))`))
   const editorTheme = await js(win, `(()=>{
@@ -640,6 +687,24 @@ async function run(win) {
     reference.remove(); return matches
   })()`)
   check('异步加载的编辑器样式仍跟随应用主题', editorTheme)
+
+  // 模板页需要保留 CodeMirror 实例，否则切路由会把撤销/重做历史一起销毁。
+  const undoMarker = 'ABP undo route marker'
+  await js(win, "document.querySelector('.md-editor .cm-content')?.focus()")
+  await win.webContents.insertText(undoMarker)
+  check('撤销历史测试文本已写入', await waitFor(win,
+    "document.querySelector('.md-editor .cm-content')?.textContent.includes(" + JSON.stringify(undoMarker) + ")"))
+  await nav(win, 4)
+  check('切离模板页后编辑器不在当前页面', await waitFor(win, "!document.querySelector('.md-editor')"))
+  await nav(win, 1)
+  check('切回模板页后编辑器恢复', await waitFor(win, "document.querySelector('.md-editor .cm-content')"))
+  await js(win, "document.querySelector('.md-editor .cm-content')?.focus()")
+  await pressShortcut(win, 'Z', ['control'])
+  check('切页后 Ctrl+Z 仍可撤销', await waitFor(win,
+    "!document.querySelector('.md-editor .cm-content')?.textContent.includes(" + JSON.stringify(undoMarker) + ")"))
+  await pressShortcut(win, 'Y', ['control'])
+  check('切页后 Ctrl+Y 仍可重做', await waitFor(win,
+    "document.querySelector('.md-editor .cm-content')?.textContent.includes(" + JSON.stringify(undoMarker) + ")"))
 
   // ---------- 确认弹窗是应用内的，且关掉之后输入框还能打字 ----------
   // 这是本轮最重要的回归：window.confirm 是系统模态框，关掉之后键盘焦点回不到 webContents，
@@ -694,6 +759,20 @@ async function run(win) {
   await wait(700)
   check('进入代理设置', await clickByText(win, '代理'))
   await wait(500)
+  const proxySites = await js(win, `(()=>{const rows=[...document.querySelectorAll('[data-proxy-site]')];
+    return {count:rows.length,urls:rows.map(row=>row.querySelector('a')?.textContent.trim()),
+      statuses:rows.map(row=>row.textContent.includes('未检测'))}})()`)
+  check(
+    '代理页始终逐行显示八个站点、网址和未检测状态',
+    proxySites && proxySites.count === 8 && proxySites.urls.every(url => /^https:\/\//.test(url)) &&
+      proxySites.statuses.every(Boolean),
+    JSON.stringify(proxySites)
+  )
+  check('每个站点都有独立检测图标按钮', (await js(win,
+    "document.querySelectorAll('[data-proxy-site] [data-probe=proxy-site-test]').length")) === 8)
+  check('站点检测按钮使用逐行独立状态', await js(win,
+    `(()=>[...document.querySelectorAll('[data-probe=proxy-site-test]')]
+      .every(button=>!button.disabled&&button.dataset.testing==='false'))()`))
   check('切到自定义代理', await clickByText(win, '自定义', { exact: true }))
   await wait(600)
   const portFocused = (await focusByPlaceholder(win, '7890', { select: true })) !== null
@@ -722,7 +801,75 @@ async function run(win) {
   )
   check('聚焦 API Key 输入框', keyFocused)
   await typeText(win, 'abp_secret_probe_key')
+  check('敏感字段提供显示密码图标', await waitFor(win, `document.querySelector('[aria-label="显示密码"]')`))
+  check('点击图标可显示 API Key', await clickElementAt(win, `document.querySelector('[aria-label="显示密码"]')`))
+  check('API Key 已切换为明文输入类型', await waitFor(win,
+    `document.querySelector('[data-probe=site-account-editor] input')?.type==='text'`))
+  await clickElementAt(win, `document.querySelector('[aria-label="隐藏密码"]')`)
   await wait(1600)
+
+  const accountShell = await js(win, `(()=>{const nav=document.querySelector('[role=dialog] nav')
+    const sw=document.querySelector('[data-probe=site-enabled-switch]')
+    return nav&&sw?{sites:nav.querySelectorAll('[data-account-site]').length,disabled:sw.disabled,state:sw.getAttribute('data-state')}:null})()`)
+  check('账号详情列出八个站点', accountShell && accountShell.sites === 8, JSON.stringify(accountShell))
+  check('AniBT 模式下 AniBT 强制启用', accountShell && accountShell.disabled && accountShell.state === 'checked', JSON.stringify(accountShell))
+  check('账号弹窗右下角关闭按钮使用关闭图标', await js(win,
+    "[...document.querySelectorAll('[role=dialog] button')].some(b=>b.textContent.trim()==='关闭'&&b.querySelector('svg.lucide-x'))"))
+  check('切换到蜜柑账号配置', await clickElementAt(win, `document.querySelector('[data-account-site=mikan]')`))
+  check('蜜柑账号页已显示', await waitFor(win, `document.querySelector('[data-probe=site-account-editor]')?.dataset.site==='mikan'`))
+  check('蜜柑 ID 搜索已合并为一个按钮', (await js(win,
+    `[...document.querySelectorAll('[role=dialog] button')].filter(b=>b.textContent.trim()==='搜索 ID').length`)) === 1)
+  check('蜜柑 ID 输入使用中文名称', await js(win,
+    `(()=>{const t=document.querySelector('[data-probe=site-account-editor]')?.textContent||'';return t.includes('字幕组 ID')&&t.includes('发布组 ID')})()`))
+  check('空蜜柑账号点击检查', await clickByText(win, '检查', { exact: true, root: '[role=dialog]' }))
+  check('空 API Token 不会检查通过', await waitFor(win,
+    `document.querySelector('[data-probe=site-account-editor]')?.textContent.includes('请先填写 API Token')`))
+  const mikanTokenFocused = await js(win, `(()=>{const e=document.querySelector('[data-probe=site-account-editor] input[type=password]');
+    if(!e)return false;e.focus();return true})()`)
+  check('聚焦蜜柑 API Token 输入框', mikanTokenFocused)
+  await typeText(win, 'mikan_probe_token')
+  check('检查已填写的蜜柑 Token 配置', await clickByText(win, '检查', { exact: true, root: '[role=dialog]' }))
+  check('蜜柑不会把无法验证的 Token 标成检查通过', await waitFor(win,
+    `document.querySelector('[data-probe=site-account-editor]')?.textContent.includes('将在实际发布时验证')`))
+  const mikanId = await js(win, `(()=>{const e=document.querySelector('[data-probe=mikan-subtitle-group-id]');if(!e)return null;e.focus();return e.value})()`)
+  check('找到蜜柑字幕组 ID 输入框', mikanId !== null)
+  await typeText(win, 'x1208')
+  check('蜜柑 ID 非法中间态不会吞掉输入', (await js(win, `document.querySelector('[data-probe=mikan-subtitle-group-id]')?.value`)) === 'x1208')
+  await js(win, `document.querySelector('[data-probe=mikan-subtitle-group-id]')
+    ?.dispatchEvent(new FocusEvent('focusout',{bubbles:true}))`)
+  const mikanIdNormalized = await waitFor(win, `document.querySelector('[data-probe=mikan-subtitle-group-id]')?.value===''`)
+  const mikanIdState = await js(win, `(()=>{const input=document.querySelector('[data-probe=mikan-subtitle-group-id]')
+    return {value:input?.value,active:document.activeElement?.getAttribute('data-probe')}})()`)
+  check('蜜柑 ID 失焦后规范化回有效存储值', mikanIdNormalized, JSON.stringify(mikanIdState))
+  check('切换到 Nyaa 账号配置', await clickElementAt(win, `document.querySelector('[data-account-site=nyaa]')`))
+  check('Nyaa Anonymous 开关可见', await waitFor(win, `document.querySelector('[data-probe=nyaa-anonymous] button[role=switch]')`))
+  check('Nyaa 匿名开关使用中文名称', await js(win,
+    `document.querySelector('[data-probe=nyaa-anonymous]')?.textContent.trim()==='匿名发布'`))
+  check('Nyaa 仅显示 API 账号密码，不再显示网页登录与 Cookie', await js(win,
+    "(()=>{const t=document.querySelector('[data-probe=site-account-editor]')?.textContent||'';" +
+      "return !t.includes('打开网页登录')&&!t.includes('Cookie')})()"))
+  check('站点检查结果不会跟随到其他站点', !(await js(win,
+    `document.querySelector('[data-probe=site-account-editor]')?.textContent.includes('请先填写 API Token')`)))
+  check('切换到动漫花园账号配置', await clickElementAt(win, `document.querySelector('[data-account-site=dmhy]')`))
+  check('动漫花园提供凭据登录、手动网页登录和清 Cookie', await waitFor(win,
+    `(()=>{const root=document.querySelector('[data-probe=site-account-editor][data-site=dmhy]');return root&&
+      root.querySelector('[data-probe=site-credential-login]')&&root.querySelector('[data-probe=site-open-login]')&&
+      root.querySelector('[data-probe=site-clear-cookies]')})()`))
+  check('动漫花园在应用内提供图片验证码输入和刷新按钮', await waitFor(win,
+    `(()=>{const root=document.querySelector('[data-probe=site-account-editor][data-site=dmhy]');return root&&
+      root.querySelector('[data-probe=dmhy-captcha-image]')&&root.querySelector('[data-probe=dmhy-captcha-input]')&&
+      root.querySelector('[data-probe=dmhy-captcha-refresh]')})()`))
+  check('切换到萌番组账号配置', await clickElementAt(win, `document.querySelector('[data-account-site=bangumiMoe]')`))
+  check('萌番组提供凭据登录、手动网页登录和清 Cookie', await waitFor(win,
+    `(()=>{const root=document.querySelector('[data-probe=site-account-editor][data-site=bangumiMoe]');return root&&
+      root.querySelector('[data-probe=site-credential-login]')&&root.querySelector('[data-probe=site-open-login]')&&
+      root.querySelector('[data-probe=site-clear-cookies]')})()`))
+  await js(win, `document.querySelector('[data-account-site=acgrip]')?.scrollIntoView({block:'center'})`)
+  check('切换到 ACG.RIP 账号配置', await clickElementAt(win, `document.querySelector('[data-account-site=acgrip]')`))
+  check('ACG.RIP 账号页已显示', await waitFor(win,
+    `document.querySelector('[data-probe=site-account-editor]')?.dataset.site==='acgrip'`))
+  check('ACG.RIP 明示支持 tpx 链接和裸 Token', await waitFor(win,
+    `document.querySelector('[data-probe=site-account-editor][data-site=acgrip]')?.textContent.includes('tpx://acg.rip/...')`))
 
   const cfgPath = path.join(sandbox, 'AniBT Publish', 'config.json')
   const secPath = path.join(sandbox, 'AniBT Publish', 'secrets.json')
@@ -924,5 +1071,9 @@ app.whenReady().then(async () => {
   } catch {
     /* 临时目录留着也无妨 */
   }
-  app.exit(failed.length === 0 ? 0 : 1)
+  const exitCode = failed.length === 0 ? 0 : 1
+  // Electron utility processes can retain the inherited CI stdio handle after app.exit().
+  // Keep app.exit for normal cleanup, with a short unref'ed hard-exit fallback.
+  setTimeout(() => process.exit(exitCode), 1000).unref()
+  app.exit(exitCode)
 })

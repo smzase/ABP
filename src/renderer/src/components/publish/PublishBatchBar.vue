@@ -8,6 +8,8 @@ import UiSwitch from '@renderer/components/ui/UiSwitch.vue'
 import UiSelect from '@renderer/components/ui/UiSelect.vue'
 import UiSelectItem from '@renderer/components/ui/UiSelectItem.vue'
 import UiTooltip from '@renderer/components/ui/UiTooltip.vue'
+import { useAppStore } from '@renderer/stores/app.ts'
+import { enabledSites, SITE_LABELS } from '@shared/sites.ts'
 
 /**
  * 阶段二底栏右侧：Preview 测试发布开关、Nyaa 代发分类、发布按钮。
@@ -18,6 +20,17 @@ import UiTooltip from '@renderer/components/ui/UiTooltip.vue'
  */
 const { t } = useI18n()
 const store = usePublishStore()
+const app = useAppStore()
+const localMode = computed(() => app.data.settings.publishMode === 'local')
+const localSites = computed(() => {
+  const sites = new Set<ReturnType<typeof enabledSites>[number]>()
+  for (const entry of store.entries) {
+    const template = store.templateOf(entry)
+    const group = app.data.groups.find((item) => item.id === template?.groupId)
+    if (group) for (const site of enabledSites(group)) sites.add(site)
+  }
+  return [...sites]
+})
 
 const preview = computed({
   get: () => store.batch.preview,
@@ -50,21 +63,25 @@ async function publish(): Promise<void> {
 
 <template>
   <div class="flex items-center gap-4">
-    <UiTooltip :content="t('publish.previewHint')">
+    <UiTooltip v-if="!localMode" :content="t('publish.previewHint')">
       <label class="flex cursor-pointer items-center gap-2 text-sm">
         <UiSwitch v-model="preview" />
         {{ t('publish.preview') }}
       </label>
     </UiTooltip>
 
-    <label class="flex cursor-pointer items-center gap-2 text-sm">
+    <label v-if="!localMode" class="flex cursor-pointer items-center gap-2 text-sm">
       <UiSwitch v-model="allNyaa" />
       {{ t('publish.nyaa') }}
     </label>
 
-    <UiSelect v-if="anyNyaa" v-model="nyaaCategory" class="w-56" :title="t('publish.nyaaCategory')">
+    <UiSelect v-if="(!localMode && anyNyaa) || (localMode && localSites.includes('nyaa'))" v-model="nyaaCategory" class="w-56" :title="t('publish.nyaaCategory')">
       <UiSelectItem v-for="c in NYAA_CATEGORIES" :key="c.code" :value="c.code">{{ c.code }} · {{ c.label }}</UiSelectItem>
     </UiSelect>
+
+    <span v-if="localMode" class="max-w-64 truncate text-xs text-muted-foreground">
+      {{ localSites.map((site) => SITE_LABELS[site]).join(' · ') }}
+    </span>
 
     <UiTooltip v-if="missingTitle" :content="t('publishCheck.titleRequired')">
       <span>
