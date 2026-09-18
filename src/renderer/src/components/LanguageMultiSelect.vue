@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Check, ChevronDown, Plus } from '@lucide/vue'
 import UiPopover from '@renderer/components/ui/UiPopover.vue'
@@ -11,12 +11,19 @@ import { DEFAULT_LANGUAGES } from '@shared/constants.ts'
  * 字幕语言多选器：CHS / CHT / JP / EN 预设 + 自定义语言代码。
  * 选中顺序即 {{languageCode}} 拼接顺序（CHS&JP）。
  */
-const props = defineProps<{ class?: string }>()
+const props = defineProps<{ class?: string; disabled?: boolean; probe?: string }>()
 const model = defineModel<string[]>({ default: () => [] })
 const { t } = useI18n()
 
 const open = ref(false)
 const customCode = ref('')
+
+watch(
+  () => props.disabled,
+  (disabled) => {
+    if (disabled) open.value = false
+  }
+)
 
 const allPresets = computed(() => {
   const extras = model.value.filter((l) => !DEFAULT_LANGUAGES.includes(l))
@@ -24,6 +31,7 @@ const allPresets = computed(() => {
 })
 
 function toggle(lang: string): void {
+  if (props.disabled) return
   if (model.value.includes(lang)) {
     model.value = model.value.filter((l) => l !== lang)
   } else {
@@ -32,6 +40,7 @@ function toggle(lang: string): void {
 }
 
 function addCustom(): void {
+  if (props.disabled) return
   const v = customCode.value.trim().toUpperCase()
   if (v && !model.value.includes(v)) {
     model.value = [...model.value, v]
@@ -46,7 +55,9 @@ void props
   <UiPopover v-model:open="open">
     <template #trigger>
       <button
-        class="flex h-9 min-w-24 cursor-pointer items-center gap-1 rounded-md border border-input bg-popover px-2 py-1 text-sm shadow-sm hover:bg-accent"
+        :data-probe="probe"
+        :disabled="disabled"
+        class="flex h-9 min-w-24 cursor-pointer items-center gap-1 rounded-md border border-input bg-popover px-2 py-1 text-sm shadow-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-popover"
       >
         <span v-if="model.length === 0" class="text-muted-foreground">—</span>
         <span v-else class="flex flex-wrap gap-1">

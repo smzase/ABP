@@ -2,7 +2,8 @@
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Search, Loader2 } from '@lucide/vue'
-import type { BgmSearchItem } from '@shared/types.ts'
+import type { BgmSearchItem, MikanSearchItem } from '@shared/types.ts'
+import { selectMikanBangumiMatch } from '@shared/mikan.ts'
 import { useAppStore } from '@renderer/stores/app.ts'
 import { genId } from '@renderer/lib/utils.ts'
 import UiDialog from '@renderer/components/ui/UiDialog.vue'
@@ -26,6 +27,30 @@ const creatingId = ref<number | null>(null)
 
 function emptyFilenameExample() {
   return { fileName: '', languages: [], subtitleType: null, resolution: '', format: '', codec: '', bitDepth: '', audioCodec: '', source: '',  }
+}
+
+function defaultTemplateContent(): { title: string; description: string } {
+  const title = app.data.titleTemplates.find((item) => item.id === app.data.defaultTitleTemplateId)?.template ?? ''
+  const description = app.data.descTemplates.find((item) => item.id === app.data.defaultDescTemplateId)?.markdown ?? ''
+  return { title, description }
+}
+
+async function findMikanBangumiId(bgmId: number, names: string[]): Promise<number | null> {
+  const queries = [...new Set(names.map((name) => name.trim()).filter(Boolean))].slice(0, 3)
+  if (queries.length === 0) return null
+  try {
+    const responses = await Promise.allSettled(queries.map((name) => window.api.searchMikan('bangumi', name)))
+    const merged = new Map<number, MikanSearchItem>()
+    for (const settled of responses) {
+      if (settled.status !== 'fulfilled') continue
+      const response = settled.value
+      for (const item of response.ok ? (response.data ?? []) : []) merged.set(item.id, item)
+    }
+    return selectMikanBangumiMatch([...merged.values()], bgmId, names)?.id ?? null
+  } catch {
+    // Mikan 不可达不应阻断 Bangumi 模板创建；按需求保留为空即可。
+    return null
+  }
 }
 
 let debounce: ReturnType<typeof setTimeout> | null = null
@@ -69,10 +94,17 @@ async function createFromSearch(item: BgmSearchItem): Promise<void> {
       romaji: '',
       en: ''
     }
+    const mikanBangumiId = await findMikanBangumiId(item.bgmId, [
+      names.nameCn,
+      names.name,
+      names.romaji,
+      names.en
+    ])
+    const defaults = defaultTemplateContent()
     app.data.animeTemplates.push({
       id: genId(),
       bgmId: item.bgmId,
-      mikanBangumiId: null,
+      mikanBangumiId,
       names: {
         zh: names.nameCn || item.nameCn || '',
         zhTw: '',
@@ -86,8 +118,8 @@ async function createFromSearch(item: BgmSearchItem): Promise<void> {
       nyaaHidden: false,
       nyaaRemake: false,
       traditionalizeTitle: false,
-      titleTemplates: { simp: '', trad: '', both: '' },
-      descriptionMd: '',
+      titleTemplates: { simp: defaults.title, trad: defaults.title, both: defaults.title },
+      descriptionMd: defaults.description,
       filenameExamples: { simpInternal: emptyFilenameExample(), tradInternal: emptyFilenameExample(), embedded: emptyFilenameExample() },
       createdAt: Date.now(),
       updatedAt: Date.now()
@@ -100,6 +132,7 @@ async function createFromSearch(item: BgmSearchItem): Promise<void> {
 function createFromManual(): void {
   const id = Number(manualId.value.trim())
   if (!Number.isInteger(id) || id <= 0) return
+  const defaults = defaultTemplateContent()
   app.data.animeTemplates.push({
     id: genId(),
     bgmId: id,
@@ -111,8 +144,8 @@ function createFromManual(): void {
     nyaaHidden: false,
     nyaaRemake: false,
     traditionalizeTitle: false,
-    titleTemplates: { simp: '', trad: '', both: '' },
-    descriptionMd: '',
+    titleTemplates: { simp: defaults.title, trad: defaults.title, both: defaults.title },
+    descriptionMd: defaults.description,
     filenameExamples: { simpInternal: emptyFilenameExample(), tradInternal: emptyFilenameExample(), embedded: emptyFilenameExample() },
     createdAt: Date.now(),
     updatedAt: Date.now()

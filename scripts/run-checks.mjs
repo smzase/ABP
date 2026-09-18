@@ -13,7 +13,12 @@ import {
   pickTitleVariant
 } from '../src/shared/template.ts'
 import { sortLanguages } from '../src/shared/constants.ts'
-import { detectSubtitle, DEFAULT_SUBTITLE_RULES } from '../src/shared/subtitle-detect.ts'
+import {
+  detectSubtitle,
+  DEFAULT_SUBTITLE_RULES,
+  SUBTITLE_PRESET_VERSION,
+  updateSubtitlePresets
+} from '../src/shared/subtitle-detect.ts'
 import { parseFileName } from '../src/shared/parse-name.ts'
 import {
   applyFilenameExample,
@@ -31,10 +36,15 @@ import {
 import { defaultAppData, sanitizeAppData } from '../src/shared/store-doc.ts'
 import { sealSecrets, openSecrets, collectSecrets, mergeSecrets, redactSecrets } from '../src/shared/secrets-crypto.ts'
 import { formatDescription, markdownToBbcode, markdownToHtml } from '../src/shared/description-format.ts'
-import { buildMikanRequestBody } from '../src/shared/mikan.ts'
+import {
+  buildMikanRequestBody,
+  parseMikanSearchItems,
+  selectMikanBangumiMatch
+} from '../src/shared/mikan.ts'
 import { PUBLISH_SITES } from '../src/shared/types.ts'
 import {
   defaultSiteAccount,
+  acgripPostAsTeamValue,
   evaluateDmhyLoginResponse,
   isSiteConfigured,
   normalizeAcgripToken,
@@ -77,6 +87,7 @@ ok('languageCode / subtitleLangZh', () => {
   assert.equal(subtitleLangZhTag(['CHS', 'CHT', 'JP'], 'EMBEDDED'), '简繁日内封')
   assert.equal(subtitleLangZhTag(['CHS'], 'INTERNAL'), '简内嵌')
   assert.equal(subtitleLangZhTag([], 'NONE'), '无字幕')
+  assert.equal(subtitleLangZhTag(['CHS', 'CHT', 'JP'], 'NONE'), '无字幕')
 })
 ok('语言顺序固定为 CHS/CHT/JP/EN，不会出现 JP&CHS', () => {
   assert.equal(languageCodeTag(['JP', 'CHS']), 'CHS&JP')
@@ -156,6 +167,25 @@ ok('种子标题自动匹配番剧模板，长名称优先', () => {
   ]
   assert.equal(matchAnimeTemplateId('[Group] 葬送的芙莉莲 - 01.torrent', '葬送のフリーレン - 01', templates), 'long')
   assert.equal(matchAnimeTemplateId('[Group] Unknown Show - 01.torrent', 'Unknown Show - 01', templates), '')
+})
+ok('无字幕模板忽略残留语言，不能生成“简繁日无字幕”', () => {
+  assert.equal(
+    renderTemplate('{{languageCode}}|{{subtitleLangZh}}', {
+      languages: ['CHS', 'CHT', 'JP'],
+      subtitleType: 'NONE'
+    }),
+    '|无字幕'
+  )
+})
+ok('数字/短标题不会靠集数或组名误选模板', () => {
+  const templates = [
+    { id: 'number', names: { zh: '86', zhTw: '', romaji: '', en: '86', native: '' } },
+    { id: 'full', names: { zh: '86－不存在的战区－', zhTw: '', romaji: '', en: '86 Eighty Six', native: '' } },
+    { id: 'up', names: { zh: '', zhTw: '', romaji: '', en: 'Up', native: '' } }
+  ]
+  assert.equal(matchAnimeTemplateId('[Other] Completely Different Show - 86 [1080p]', '', templates), '')
+  assert.equal(matchAnimeTemplateId('[Group] 86 Eighty Six - 01 [1080p]', '', templates), 'full')
+  assert.equal(matchAnimeTemplateId('[SuperGroup] Unknown - 01 [1080p]', '', templates), '')
 })
 console.log('subtitle-detect:')
 ok('预设词识别', () => {
@@ -245,6 +275,45 @@ ok('范围集数与版本边界', () => {
   assert.equal(parseFileName('AV1 encode - 01 [1080p].mkv').version, null)
   assert.equal(parseFileName('Title - 01 [1080p] V2.mkv').version, 'v2')
   assert.equal(parseFileName('Show V2 - 01 [1080p].mkv').version, null)
+})
+
+ok('Nyaa 多来源命名：标题数字不抢集数，最后一个发布槽位优先', () => {
+  assert.equal(
+    parseFileName('[LoliHouse] Otome Game Sekai wa Mob ni Kibishii Sekai desu 2 - 08 [WebRip 1080p HEVC-10bit AAC SRTx2].mkv').episode,
+    '08'
+  )
+  assert.equal(
+    parseFileName('[SweetSub][藤本樹 17-26][Fujimoto Tatsuki 17-26][07][WebRip][1080P][AVC 8bit]').episode,
+    '07'
+  )
+  assert.equal(
+    parseFileName('[SweetSub] VIRGIN PUNK - 01 Clockwork Girl [BDRip 1080p HEVC-10bit].mkv').episode,
+    '01'
+  )
+  assert.equal(parseFileName('[Group] Show - 22(94) [1080p].mkv').episode, '22')
+  assert.equal(parseFileName('[Group] 100 Meters [BDRip 1080p].mkv').episode, null)
+  assert.equal(parseFileName('[Group] 16bit Sensation Another Layer [BDRip 1080p].mkv').episode, null)
+})
+
+ok('合集、特别篇、修订版本和已知数字标题', () => {
+  assert.equal(parseFileName('Title [01-12(全集)][1080p]').episode, '01-12')
+  assert.equal(parseFileName('Title [01_13][BDRip]').episode, '01-13')
+  assert.equal(parseFileName('Title [01-12 精校合集][1080p]').episode, '01-12')
+  assert.equal(parseFileName('Title [OVA][BDRip][1080p]').episode, 'OVA')
+  assert.equal(parseFileName('Title [SP_02][1080p]').episode, 'SP02')
+  const revised = parseFileName('Title [81v2][WebRip 1080p]')
+  assert.equal(revised.episode, '81')
+  assert.equal(revised.version, 'v2')
+  assert.equal(parseFileName('[Group][86][1080p]', undefined, ['86']).episode, null)
+})
+
+ok('容器元数据、12bit 与字幕轨数量标记', () => {
+  const p = parseFileName('[DMG][Title][01][1080P][12bit][MP4]')
+  assert.equal(p.format, 'MP4')
+  assert.equal(p.bitDepth, '12bit')
+  const muxed = parseFileName('[LoliHouse] Title - 01 [WebRip 1080p HEVC-10bit AAC ASSx2].mkv')
+  assert.deepEqual(muxed.languages, [])
+  assert.equal(muxed.subtitleType, 'EMBEDDED')
 })
 
 ok('SxxExx 集数（曾经整个漏掉 → episodeKey 发出去是空串）', () => {
@@ -478,6 +547,12 @@ ok('ACG.RIP 同时接受 tpx 链接与裸 Token，发送前统一为裸 Token', 
   assert.equal(normalizeAcgripToken('7233-px2fff6ks9eeeeee'), '7233-px2fff6ks9eeeeee')
   assert.equal(normalizeAcgripToken('  TPX://ACG.RIP/7233-abc  '), '7233-abc')
 })
+ok('ACG.RIP 联盟发布开关只在开启时发送 post_as_team=1', () => {
+  const account = defaultSiteAccount('acgrip')
+  assert.equal(acgripPostAsTeamValue(account), null)
+  account.publishAsTeam = true
+  assert.equal(acgripPostAsTeamValue(account), '1')
+})
 ok('动漫花园应用内登录能区分成功、密码错误和验证码错误', () => {
   assert.deepEqual(evaluateDmhyLoginResponse('<p>登入成功</p>'), { ok: true, message: '登录成功' })
   assert.deepEqual(evaluateDmhyLoginResponse('帳戶密碼錯誤'), { ok: false, message: '账号或密码错误' })
@@ -503,7 +578,10 @@ ok('默认值完整', () => {
   assert.equal(d.settings.proxy.host, '127.0.0.1')
   assert.equal(d.settings.proxy.port, 7890)
   assert.ok(d.settings.subtitleDetect.rules.length > 0)
+  assert.equal(d.settings.subtitleDetect.presetVersion, SUBTITLE_PRESET_VERSION)
   assert.ok(d.titleTemplates.length > 0)
+  assert.equal(d.defaultTitleTemplateId, null)
+  assert.equal(d.defaultDescTemplateId, null)
   assert.equal(d.settings.publishMode, 'anibt')
 })
 ok('损坏输入回退默认', () => {
@@ -633,6 +711,62 @@ ok('多站点敏感字段抽离、Nyaa 旧 Cookie 丢弃、其余字段可还原
   assert.equal(redacted[0].sites.mikan.apiToken, 'mikan-token')
   assert.equal(redacted[0].sites.dmhy.cookies[0].value, 'cookie')
   assert.deepEqual(redacted[0].sites.nyaa.cookies, [])
+})
+ok('默认模板 ID 只保留仍存在的模板', () => {
+  const valid = sanitizeAppData({
+    titleTemplates: [{ id: 'title-a', name: 'A', template: 'A' }],
+    descTemplates: [{ id: 'desc-a', name: 'A', markdown: 'A' }],
+    defaultTitleTemplateId: 'title-a',
+    defaultDescTemplateId: 'desc-a'
+  })
+  assert.equal(valid.defaultTitleTemplateId, 'title-a')
+  assert.equal(valid.defaultDescTemplateId, 'desc-a')
+  const stale = sanitizeAppData({ defaultTitleTemplateId: 'missing', defaultDescTemplateId: 'missing' })
+  assert.equal(stale.defaultTitleTemplateId, null)
+  assert.equal(stale.defaultDescTemplateId, null)
+})
+
+console.log('subtitle preset updates:')
+ok('更新预设只补新词，不覆盖同名用户规则或其他自定义词', () => {
+  const custom = [
+    { word: '簡繁日內嵌', langs: ['EN'], type: 'EXTERNAL' },
+    { word: '我的自定义词', langs: ['CHS'], type: null }
+  ]
+  const result = updateSubtitlePresets(custom, 1)
+  assert.equal(result.presetVersion, SUBTITLE_PRESET_VERSION)
+  assert.deepEqual(result.rules.find((rule) => rule.word === '簡繁日內嵌'), custom[0])
+  assert.ok(result.rules.some((rule) => rule.word === '我的自定义词'))
+  assert.ok(result.rules.some((rule) => rule.word === '簡繁日外掛'))
+  assert.ok(result.added > 0)
+  assert.equal(updateSubtitlePresets(result.rules, result.presetVersion).added, 0)
+})
+
+console.log('mikan search matching:')
+ok('Mikan 番剧搜索响应提取自有 ID、标题和 bgm.tv subject id', () => {
+  assert.deepEqual(parseMikanSearchItems('bangumi', [{
+    BangumiId: 3169,
+    ChsName: '我们的雨色协议',
+    JpnName: '僕らの雨いろプロトコル',
+    BangumiUrl: 'https://bgm.tv/subject/444634'
+  }]), [{
+    id: 3169,
+    name: '我们的雨色协议',
+    secondaryName: '僕らの雨いろプロトコル',
+    bgmId: 444634
+  }])
+})
+ok('Mikan 自动匹配优先使用 bgm.tv subject id，不盲取模糊搜索第一条', () => {
+  const rows = [
+    { id: 1, name: '同名错误项', bgmId: 111 },
+    { id: 3169, name: '我们的雨色协议', secondaryName: '僕らの雨いろプロトコル', bgmId: 444634 }
+  ]
+  assert.equal(selectMikanBangumiMatch(rows, 444634, ['我们的雨色协议'])?.id, 3169)
+  assert.equal(selectMikanBangumiMatch(rows, 999999, ['不存在的标题']), null)
+})
+ok('Mikan 旧响应无 bgm.tv id 时只接受完整标题匹配', () => {
+  const rows = [{ id: 3169, name: '我们的雨色协议', secondaryName: '僕らの雨いろプロトコル' }]
+  assert.equal(selectMikanBangumiMatch(rows, 444634, ['我们的雨色协议'])?.id, 3169)
+  assert.equal(selectMikanBangumiMatch(rows, 444634, ['我们的雨色']), null)
 })
 
 console.log('description formats:')

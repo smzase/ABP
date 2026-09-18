@@ -367,6 +367,11 @@ function pickMikan(kind: 'subtitleGroup' | 'publishGroup', item: MikanSearchItem
         <UiSecretInput v-model="account.apiToken" class="font-mono" />
         <span class="text-xs text-muted-foreground">{{ t('accounts.acgripTokenHint') }}</span>
       </div>
+      <UiTooltip :content="t('accounts.acgripPublishAsTeamHint')">
+        <label class="flex w-fit cursor-pointer items-center gap-2 text-sm" data-probe="acgrip-publish-as-team">
+          <UiSwitch v-model="account.publishAsTeam" /> {{ t('accounts.acgripPublishAsTeam') }}
+        </label>
+      </UiTooltip>
     </template>
 
     <template v-else-if="site === 'acgnxAsia' || site === 'acgnxGlobal'">

@@ -1,16 +1,22 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Plus, X, RotateCcw } from '@lucide/vue'
+import { Plus, X, RotateCcw, RefreshCw } from '@lucide/vue'
 import { SUBTITLE_TYPES, type SubtitleType } from '@shared/types.ts'
 import { SUBTITLE_TYPE_I18N_KEY, DEFAULT_LANGUAGES } from '@shared/constants.ts'
-import { detectSubtitle, DEFAULT_SUBTITLE_RULES } from '@shared/subtitle-detect.ts'
+import {
+  detectSubtitle,
+  DEFAULT_SUBTITLE_RULES,
+  SUBTITLE_PRESET_VERSION,
+  updateSubtitlePresets
+} from '@shared/subtitle-detect.ts'
 import { useAppStore } from '@renderer/stores/app.ts'
 import UiInput from '@renderer/components/ui/UiInput.vue'
 import UiButton from '@renderer/components/ui/UiButton.vue'
 import UiBadge from '@renderer/components/ui/UiBadge.vue'
 import UiCard from '@renderer/components/ui/UiCard.vue'
 import { cn } from '@renderer/lib/utils.ts'
+import { confirm } from '@renderer/lib/confirm.ts'
 
 /**
  * 字幕识别设置：
@@ -68,8 +74,30 @@ function toggleNewLang(lang: string): void {
   }
 }
 
-function resetPresets(): void {
+const presetMessage = ref('')
+
+async function resetPresets(): Promise<void> {
+  if (!(await confirm({
+    title: t('settings.resetPresetsConfirm'),
+    description: t('settings.resetPresetsDescription'),
+    confirmText: t('common.reset'),
+    destructive: true
+  }))) return
   app.data.settings.subtitleDetect.rules = structuredClone(DEFAULT_SUBTITLE_RULES)
+  app.data.settings.subtitleDetect.presetVersion = SUBTITLE_PRESET_VERSION
+  presetMessage.value = t('settings.presetsReset')
+}
+
+function updatePresets(): void {
+  const result = updateSubtitlePresets(
+    app.data.settings.subtitleDetect.rules,
+    app.data.settings.subtitleDetect.presetVersion
+  )
+  app.data.settings.subtitleDetect.rules = result.rules
+  app.data.settings.subtitleDetect.presetVersion = result.presetVersion
+  presetMessage.value = result.added > 0
+    ? t('settings.presetsUpdated', { count: result.added })
+    : t('settings.presetsCurrent')
 }
 
 // ---------- 识别测试 ----------
@@ -83,9 +111,19 @@ const testResult = computed(() =>
   <div class="flex flex-col gap-4">
     <div class="flex items-start justify-between gap-4">
       <p class="max-w-2xl text-sm text-muted-foreground">{{ t('settings.detectIntro') }}</p>
-      <UiButton variant="outline" size="sm" @click="resetPresets">
-        <RotateCcw class="h-3.5 w-3.5" /> {{ t('common.reset') }}
-      </UiButton>
+      <div class="flex flex-col items-end gap-1.5">
+        <div class="flex gap-2">
+          <UiButton variant="outline" size="sm" data-probe="update-subtitle-presets" @click="updatePresets">
+            <RefreshCw class="h-3.5 w-3.5" /> {{ t('settings.updatePresets') }}
+          </UiButton>
+          <UiButton variant="outline" size="sm" data-probe="reset-subtitle-presets" @click="resetPresets">
+            <RotateCcw class="h-3.5 w-3.5" /> {{ t('common.reset') }}
+          </UiButton>
+        </div>
+        <span v-if="presetMessage" class="text-xs text-muted-foreground" data-probe="subtitle-preset-message">
+          {{ presetMessage }}
+        </span>
+      </div>
     </div>
 
     <!-- 四个类型大按钮 -->

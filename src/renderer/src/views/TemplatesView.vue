@@ -63,12 +63,14 @@ async function removeTitle(id: string): Promise<void> {
   if (!(await confirm({ title: t('tpl.deleteConfirm'), destructive: true }))) return
   const idx = app.data.titleTemplates.findIndex((x) => x.id === id)
   if (idx >= 0) app.data.titleTemplates.splice(idx, 1)
+  if (app.data.defaultTitleTemplateId === id) app.data.defaultTitleTemplateId = null
 }
 
 async function removeDesc(id: string): Promise<void> {
   if (!(await confirm({ title: t('tpl.deleteConfirm'), destructive: true }))) return
   const idx = app.data.descTemplates.findIndex((x) => x.id === id)
   if (idx >= 0) app.data.descTemplates.splice(idx, 1)
+  if (app.data.defaultDescTemplateId === id) app.data.defaultDescTemplateId = null
 }
 
 const addLabel = computed(() => {
@@ -131,9 +133,11 @@ function onAdd(): void {
           :items="titleItems"
           :selected-id="selectedTitle?.id ?? null"
           :empty-text="t('common.empty')"
+          :default-id="app.data.defaultTitleTemplateId"
           @select="(id: string) => (selectedTitleId = id)"
           @rename="(id: string, name: string) => renameIn(app.data.titleTemplates, id, name)"
           @remove="(id: string) => removeTitle(id)"
+          @set-default="(id: string) => (app.data.defaultTitleTemplateId = id)"
           @reorder="(from: number, to: number) => reorder(app.data.titleTemplates, from, to)"
         />
         <div class="min-w-0 flex-1 overflow-y-auto">
@@ -148,9 +152,11 @@ function onAdd(): void {
           :items="descItems"
           :selected-id="selectedDesc?.id ?? null"
           :empty-text="t('common.empty')"
+          :default-id="app.data.defaultDescTemplateId"
           @select="(id: string) => (selectedDescId = id)"
           @rename="(id: string, name: string) => renameIn(app.data.descTemplates, id, name)"
           @remove="(id: string) => removeDesc(id)"
+          @set-default="(id: string) => (app.data.defaultDescTemplateId = id)"
           @reorder="(from: number, to: number) => reorder(app.data.descTemplates, from, to)"
         />
         <div class="min-w-0 flex-1 overflow-y-auto">

@@ -67,6 +67,10 @@ $env:ELECTRON_RUN_AS_NODE=$null; $env:NODE_OPTIONS=""
   蜜柑转 BBCode；ACG.RIP 用 `[markdown]` 与 `[/markdown]` 包裹。
 - 蜜柑的 `bangumiId` 不是 bgm.tv 的 `bgmId`；与 `subtitleGroupId` 成对发送。
   **无视蜜柑文档的可选 `trackers`：请求体永远不发送该字段。**
+- 从 Bangumi 搜索新建番剧模板时，可用蜜柑 `/api/bangumi/search/<keyword>` 自动补 ID；
+  必须按返回的 `BangumiUrl` subject id（旧响应才用完整标题）核对，不能盲取第一条。
+- ACG.RIP 联盟发布字段是 `post[post_as_team]=1`，关闭时不发送。
+- 标题/简介模板只有用户显式“设为默认”后，才会在新建番剧模板时复制进去；未设默认仍留空。
 - 失败的本地发布会把种子缓存到 `pending-torrents`，供记录页单站/多站重试；
   全部成功后才删除。
 - 凭据检查不能把“HTTP 可达”冒充认证成功：ACG.RIP、末日动漫、AcgnX 都没有无副作用

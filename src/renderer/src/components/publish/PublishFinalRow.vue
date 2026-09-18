@@ -27,6 +27,15 @@ function patch(p: Partial<PublishEntry>): void {
   store.replaceEntry({ ...props.entry, ...p })
 }
 
+function patchTitleField(p: Partial<PublishEntry>): void {
+  store.patchEntryAndSyncTitle(props.entry.id, p)
+}
+
+function onSubtitleType(value: string): void {
+  const subtitleType = value as PublishEntry['subtitleType']
+  patchTitleField(subtitleType === 'NONE' ? { subtitleType, languages: [] } : { subtitleType })
+}
+
 function toggleExpand(): void {
   patch({ expanded: !props.entry.expanded })
 }
@@ -39,24 +48,34 @@ function remove(): void {
 <template>
   <div class="rounded-lg border bg-card">
     <!-- 主行 -->
-    <div class="flex items-center gap-2 px-3 py-2.5">
-      <UiInput
-        :model-value="entry.title"
-        class="min-w-0 flex-1"
-        :class="cn(!entry.title.trim() && 'border-destructive')"
-        :placeholder="t('publish.title')"
-        @update:model-value="(v: string) => patch({ title: v })"
-      />
+    <div class="flex items-start gap-2 px-3 py-2.5">
+      <div class="min-w-0 flex-1">
+        <UiInput
+          data-probe="final-title-input"
+          :model-value="entry.title"
+          class="w-full"
+          :class="cn(!entry.title.trim() && 'border-destructive')"
+          :placeholder="t('publish.title')"
+          @update:model-value="(v: string) => patch({ title: v })"
+        />
+        <div class="mt-1.5 flex min-w-0 items-baseline gap-1.5 px-0.5 text-[13px] leading-5 text-muted-foreground" data-probe="final-torrent-filename">
+          <span class="shrink-0">{{ t('publish.torrentFileName') }}:</span>
+          <span class="min-w-0 break-all font-mono text-foreground/75">{{ entry.fileName }}</span>
+        </div>
+      </div>
       <UiInput
         :model-value="entry.episode"
         class="w-20 shrink-0"
         :placeholder="t('publish.episode')"
-        @update:model-value="(v: string) => patch({ episode: v })"
+        data-probe="final-episode-input"
+        @update:model-value="(v: string) => patchTitleField({ episode: v })"
       />
       <LanguageMultiSelect
+        probe="final-language-select"
         class="shrink-0"
+        :disabled="entry.subtitleType === 'NONE'"
         :model-value="entry.languages"
-        @update:model-value="(v: string[]) => patch({ languages: v })"
+        @update:model-value="(v: string[]) => patchTitleField({ languages: v })"
       />
 
       <!-- 发布状态 -->
@@ -107,11 +126,20 @@ function remove(): void {
       <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
         <div class="flex flex-col gap-1.5">
           <UiLabel>{{ t('publish.version') }}</UiLabel>
-          <UiInput :model-value="entry.version" placeholder="v1" @update:model-value="(v: string) => patch({ version: v })" />
+          <UiInput
+            data-probe="final-version-input"
+            :model-value="entry.version"
+            placeholder="v1"
+            @update:model-value="(v: string) => patchTitleField({ version: v })"
+          />
         </div>
         <div class="flex flex-col gap-1.5">
           <UiLabel>{{ t('publish.resolution') }}</UiLabel>
-          <UiSelect :model-value="entry.resolution" @update:model-value="(v: string) => patch({ resolution: v })">
+          <UiSelect
+            probe="final-resolution-select"
+            :model-value="entry.resolution"
+            @update:model-value="(v: string) => patchTitleField({ resolution: v })"
+          >
             <UiSelectItem v-for="r in RESOLUTIONS" :key="r" :value="r">{{ r }}</UiSelectItem>
             <UiSelectItem
               v-if="entry.resolution && !RESOLUTIONS.includes(entry.resolution as (typeof RESOLUTIONS)[number])"
@@ -123,7 +151,11 @@ function remove(): void {
         </div>
         <div class="flex flex-col gap-1.5">
           <UiLabel>{{ t('publish.format') }}</UiLabel>
-          <UiSelect :model-value="entry.format" @update:model-value="(v: string) => patch({ format: v })">
+          <UiSelect
+            probe="final-format-select"
+            :model-value="entry.format"
+            @update:model-value="(v: string) => patchTitleField({ format: v })"
+          >
             <UiSelectItem v-for="f in VIDEO_FORMATS" :key="f" :value="f">{{ f }}</UiSelectItem>
             <UiSelectItem
               v-if="entry.format && !VIDEO_FORMATS.includes(entry.format as (typeof VIDEO_FORMATS)[number])"
@@ -135,7 +167,11 @@ function remove(): void {
         </div>
         <div class="flex flex-col gap-1.5">
           <UiLabel>{{ t('publish.subtitleType') }}</UiLabel>
-          <UiSelect :model-value="entry.subtitleType" @update:model-value="(v: string) => patch({ subtitleType: v as typeof entry.subtitleType })">
+          <UiSelect
+            probe="final-subtitle-type-select"
+            :model-value="entry.subtitleType"
+            @update:model-value="onSubtitleType"
+          >
             <UiSelectItem v-for="s in SUBTITLE_TYPES" :key="s" :value="s">{{ t(SUBTITLE_TYPE_I18N_KEY[s]) }}</UiSelectItem>
           </UiSelect>
         </div>
@@ -143,7 +179,11 @@ function remove(): void {
 
       <div class="flex flex-col gap-1.5">
         <UiLabel>{{ t('publish.customTags') }}（{{ t('publish.customTagsHint') }}）</UiLabel>
-        <UiTagInput :model-value="entry.customTags" placeholder="NF VOSTFR ADN" @update:model-value="(v: string[]) => patch({ customTags: v })" />
+        <UiTagInput
+          :model-value="entry.customTags"
+          placeholder="NF VOSTFR ADN"
+          @update:model-value="(v: string[]) => patchTitleField({ customTags: v })"
+        />
       </div>
 
       <div class="flex min-w-0 flex-col gap-1.5">

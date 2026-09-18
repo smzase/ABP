@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Trash2 } from '@lucide/vue'
+import { Star, Trash2 } from '@lucide/vue'
 import { TEMPLATE_VARIABLE_GROUPS, renderTemplate, type TemplateVariable } from '@shared/template.ts'
 import { useAppStore } from '@renderer/stores/app.ts'
 import UiInput from '@renderer/components/ui/UiInput.vue'
@@ -95,6 +95,11 @@ async function remove(): Promise<void> {
   if (!(await confirm({ title: t('tpl.deleteConfirm'), destructive: true }))) return
   const idx = app.data.titleTemplates.findIndex((x) => x.id === props.id)
   if (idx >= 0) app.data.titleTemplates.splice(idx, 1)
+  if (app.data.defaultTitleTemplateId === props.id) app.data.defaultTitleTemplateId = null
+}
+
+function setDefault(): void {
+  app.data.defaultTitleTemplateId = props.id
 }
 </script>
 
@@ -105,6 +110,11 @@ async function remove(): Promise<void> {
         <UiLabel>{{ t('tpl.templateName') }}</UiLabel>
         <UiInput v-model="name" />
       </div>
+      <UiTooltip :content="app.data.defaultTitleTemplateId === id ? t('tpl.defaultTemplate') : t('tpl.setDefault')">
+        <UiButton variant="outline" size="icon" data-probe="set-default-title-template" @click="setDefault">
+          <Star class="h-4 w-4" :class="app.data.defaultTitleTemplateId === id && 'fill-primary text-primary'" />
+        </UiButton>
+      </UiTooltip>
       <UiButton variant="destructive" size="icon" @click="remove">
         <Trash2 class="h-4 w-4" />
       </UiButton>

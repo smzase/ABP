@@ -98,6 +98,7 @@ export function defaultSiteAccount(site: PublishSite): SiteAccountConfig {
     userAgent: '',
     identityName: '',
     anonymous: false,
+    publishAsTeam: false,
     subtitleGroupId: null,
     subtitleGroupName: '',
     publishGroupId: null,
@@ -107,6 +108,11 @@ export function defaultSiteAccount(site: PublishSite): SiteAccountConfig {
     status: '',
     lastCheckedAt: null
   }
+}
+
+/** ACG.RIP 的 Rails 表单勾选“以联盟身份发布”时只发送值 1；未勾选则不发送该字段。 */
+export function acgripPostAsTeamValue(account: SiteAccountConfig): '1' | null {
+  return account.publishAsTeam ? '1' : null
 }
 
 export function defaultSiteAccounts(): SiteAccounts {

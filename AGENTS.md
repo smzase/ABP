@@ -190,10 +190,10 @@ users see in published titles.
 - **Anime templates start blank.** New ones get empty title templates and an empty
   description rather than a copy of the first global template, and `sanitizeAppData`
   must not backfill them either — otherwise a field the user cleared grows back on the
-  next load. Users attach a global template explicitly via the picker in
-  `AnimeTemplateEditor`, which reports "自定义" once the text no longer matches any
-  global template (the state is derived by comparing content, so there is no reference
-  field that can go stale).
+  next load. The only exception is a title/description template the user explicitly
+  marked as default: new anime templates copy that content at creation time. Users can
+  still attach another global template via the picker in `AnimeTemplateEditor`, which
+  reports "自定义" once the text no longer matches any global template.
 
 ## Local direct publishing
 
@@ -224,6 +224,10 @@ users see in published titles.
   `bangumiId` together with `subtitleGroupId`; `publishGroupId` remains independent.
   **ABP deliberately never sends Mikan's optional `trackers` field.** Keep this rule
   in `shared/mikan.ts` and its unit test even though the upstream document lists it.
+- Mikan anime search uses `/api/bangumi/search/<keyword>`. Automatic filling after a
+  Bangumi search must match the returned `BangumiUrl` subject id (or an exact normalized
+  title for older responses); never take the first fuzzy result blindly.
+- ACG.RIP's alliance checkbox is `post[post_as_team]=1`; omit the field when disabled.
 - Nyaa follows Nyaapi exclusively: POST `/api/upload` with Basic Auth, multipart
   fields `torrent` and JSON `torrent_data`. Do not add the legacy web-form Cookie
   upload back.

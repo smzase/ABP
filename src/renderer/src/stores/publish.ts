@@ -12,6 +12,7 @@ import { renderTemplate, pickTitleVariant } from '@shared/template.ts'
 import { toPlain } from '@shared/plain.ts'
 import { validatePublishPayload, type PublishProblem } from '@shared/publish-validate.ts'
 import { matchAnimeTemplateId } from '@shared/anime-match.ts'
+import { parseFileName } from '@shared/parse-name.ts'
 import {
   applyFilenameExample,
   emptyFilenameExample,
@@ -85,9 +86,17 @@ export const usePublishStore = defineStore('publish', () => {
     const rules = app.data.settings.subtitleDetect.rules
     const animeTemplateId = matchAnimeTemplateId(meta.fileName, meta.innerName, app.data.animeTemplates)
     const matchedTemplate = app.data.animeTemplates.find((tpl) => tpl.id === animeTemplateId)
-    const p = applyFilenameExample(meta.parsed, matchedTemplate?.filenameExamples, rules)
-    const languages = [...p.languages]
-    const subtitleType = inferSubtitleType(p.format, languages, p.subtitleType)
+    // 主进程不知道用户自定义词库，也不知道匹配到的番剧标题。渲染层在模板匹配后
+    // 重跑一次：既应用当前词库，也先屏蔽标题别名，避免 86/100/365 被当成集数。
+    const parsed = parseFileName(
+      meta.innerName || meta.fileName,
+      rules,
+      matchedTemplate ? Object.values(matchedTemplate.names) : []
+    )
+    const p = applyFilenameExample(parsed, matchedTemplate?.filenameExamples, rules)
+    const detectedLanguages = [...p.languages]
+    const subtitleType = inferSubtitleType(p.format, detectedLanguages, p.subtitleType)
+    const languages = subtitleType === 'NONE' ? [] : detectedLanguages
     const entry: PublishEntry = {
       id: genId(),
       torrentToken: meta.token,
@@ -139,6 +148,21 @@ export const usePublishStore = defineStore('publish', () => {
   function replaceEntry(next: PublishEntry): void {
     const idx = entries.value.findIndex((e) => e.id === next.id)
     if (idx >= 0) entries.value[idx] = next
+  }
+
+  /**
+   * 更新会参与标题模板的字段时同步重渲染标题。
+   * 仅当当前标题仍等于旧字段生成的标题时才联动；用户手工改过标题后不覆盖。
+   */
+  function patchEntryAndSyncTitle(id: string, patch: Partial<PublishEntry>): void {
+    const idx = entries.value.findIndex((entry) => entry.id === id)
+    if (idx < 0) return
+    const current = entries.value[idx]
+    const titleWasGenerated = current.title === renderEntryTitle(current)
+    const next = { ...current, ...patch }
+    if (next.subtitleType === 'NONE') next.languages = []
+    if (titleWasGenerated) next.title = renderEntryTitle(next)
+    entries.value[idx] = next
   }
 
   function templateOf(entry: PublishEntry): AnimeTemplate | undefined {
@@ -215,7 +239,7 @@ export const usePublishStore = defineStore('publish', () => {
     entry.resolution = parsed.resolution ?? entry.resolution
     entry.format = parsed.format ?? entry.format
     entry.subtitleType = inferSubtitleType(parsed.format, parsed.languages, parsed.subtitleType)
-    entry.languages = [...parsed.languages]
+    entry.languages = entry.subtitleType === 'NONE' ? [] : [...parsed.languages]
     entry.codec = parsed.codec ?? entry.codec
     entry.bitDepth = parsed.bitDepth ?? entry.bitDepth
     entry.audioCodec = parsed.audioCodec ?? entry.audioCodec
@@ -481,6 +505,7 @@ export const usePublishStore = defineStore('publish', () => {
     addTorrent,
     removeEntry,
     replaceEntry,
+    patchEntryAndSyncTitle,
     templateOf,
     renderEntryTitle,
     fillTitlesFromTemplates,

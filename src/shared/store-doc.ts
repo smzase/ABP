@@ -10,7 +10,11 @@ import {
   type SubtitleType
 } from './types.ts'
 import { DEFAULT_ACCENT } from './constants.ts'
-import { DEFAULT_SUBTITLE_RULES } from './subtitle-detect.ts'
+import {
+  DEFAULT_SUBTITLE_RULES,
+  LEGACY_SUBTITLE_PRESET_VERSION,
+  SUBTITLE_PRESET_VERSION
+} from './subtitle-detect.ts'
 import { defaultSiteAccount, defaultSiteAccounts } from './sites.ts'
 
 /**
@@ -24,7 +28,10 @@ export function defaultSettings(): Settings {
     appearance: { mode: 'light', accent: DEFAULT_ACCENT },
     locale: 'zh-CN',
     proxy: { mode: 'system', type: 'HTTP', host: '127.0.0.1', port: 7890, username: '', password: '' },
-    subtitleDetect: { rules: structuredClone(DEFAULT_SUBTITLE_RULES) },
+    subtitleDetect: {
+      rules: structuredClone(DEFAULT_SUBTITLE_RULES),
+      presetVersion: SUBTITLE_PRESET_VERSION
+    },
     sidebarCollapsed: false,
     publishMode: 'anibt'
   }
@@ -44,6 +51,8 @@ export function defaultAppData(): AppData {
       }
     ],
     descTemplates: [],
+    defaultTitleTemplateId: null,
+    defaultDescTemplateId: null,
     animeTemplates: [],
     records: []
   }
@@ -98,6 +107,7 @@ function cleanSiteAccount(site: PublishSite, v: unknown): SiteAccountConfig {
     userAgent: str(x.userAgent),
     identityName: str(x.identityName),
     anonymous: x.anonymous === true,
+    publishAsTeam: x.publishAsTeam === true,
     subtitleGroupId: num(x.subtitleGroupId),
     subtitleGroupName: str(x.subtitleGroupName),
     publishGroupId: num(x.publishGroupId),
@@ -168,7 +178,14 @@ export function sanitizeAppData(raw: unknown): AppData {
                 : null
             }))
             .filter((x) => x.word.length > 0)
-        : structuredClone(DEFAULT_SUBTITLE_RULES)
+        : structuredClone(DEFAULT_SUBTITLE_RULES),
+      presetVersion: (() => {
+        const fallback = Array.isArray(detect.rules)
+          ? LEGACY_SUBTITLE_PRESET_VERSION
+          : SUBTITLE_PRESET_VERSION
+        const value = num(detect.presetVersion, fallback) ?? fallback
+        return Math.max(LEGACY_SUBTITLE_PRESET_VERSION, Math.min(SUBTITLE_PRESET_VERSION, Math.floor(value)))
+      })()
     },
     sidebarCollapsed: s.sidebarCollapsed === true,
     publishMode: s.publishMode === 'local' ? 'local' : 'anibt'
@@ -211,6 +228,15 @@ export function sanitizeAppData(raw: unknown): AppData {
       markdown: str(t.markdown)
     }))
   }
+
+  const requestedTitleDefault = typeof r.defaultTitleTemplateId === 'string' ? r.defaultTitleTemplateId : null
+  base.defaultTitleTemplateId = requestedTitleDefault && base.titleTemplates.some((item) => item.id === requestedTitleDefault)
+    ? requestedTitleDefault
+    : null
+  const requestedDescDefault = typeof r.defaultDescTemplateId === 'string' ? r.defaultDescTemplateId : null
+  base.defaultDescTemplateId = requestedDescDefault && base.descTemplates.some((item) => item.id === requestedDescDefault)
+    ? requestedDescDefault
+    : null
 
   if (Array.isArray(r.animeTemplates)) {
     base.animeTemplates = r.animeTemplates.filter(isObj).map((a) => {

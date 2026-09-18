@@ -64,6 +64,8 @@ export interface SubtitleDetectRule {
 
 export interface SubtitleDetectSettings {
   rules: SubtitleDetectRule[]
+  /** 已合并到用户规则中的客户端预设版本。 */
+  presetVersion: number
 }
 
 export interface Settings {
@@ -104,6 +106,8 @@ export interface SiteAccountConfig {
   identityName: string
   /** Nyaa 直发是否匿名。 */
   anonymous: boolean
+  /** ACG.RIP 是否以当前账号所属联盟身份发布。 */
+  publishAsTeam: boolean
   subtitleGroupId: number | null
   subtitleGroupName: string
   publishGroupId: number | null
@@ -231,6 +235,8 @@ export interface AppData {
   groups: GroupAccount[]
   titleTemplates: TitleTemplate[]
   descTemplates: DescTemplate[]
+  defaultTitleTemplateId: string | null
+  defaultDescTemplateId: string | null
   animeTemplates: AnimeTemplate[]
   records: PublishRecord[]
 }
@@ -366,9 +372,12 @@ export interface LocalPublishResult {
 }
 
 export interface MikanSearchItem {
+  /** Mikan 自有番剧 ID。 */
   id: number
   name: string
   secondaryName?: string
+  /** 搜索结果关联的 bgm.tv subject id；只有番剧搜索会提供。 */
+  bgmId?: number
 }
 
 export type MikanSearchKind = 'bangumi' | 'subtitleGroup' | 'publishGroup'

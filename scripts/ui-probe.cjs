@@ -157,6 +157,20 @@ function openSelectByText(win, text) {
   )
 }
 
+function openSelectBySelector(win, selector) {
+  const lit = JSON.stringify(selector)
+  return js(
+    win,
+    `(()=>{ try {
+      const b=document.querySelector(${lit})
+      if(!b || b.disabled) return false
+      b.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,button:0,pointerType:'mouse'}))
+      b.dispatchEvent(new PointerEvent('pointerup',{bubbles:true,cancelable:true,button:0,pointerType:'mouse'}))
+      return true
+    } catch { return false } })()`
+  )
+}
+
 /** 把鼠标移到某元素中心（真实输入事件，用于触发 hover 类交互） */
 async function hoverSelector(win, selector) {
   const lit = JSON.stringify(selector)
@@ -357,6 +371,14 @@ async function run(win) {
   const varCount = await js(win, `document.querySelectorAll('button.font-mono').length`)
   check('变量按钮渲染出来了（曾因缺 TooltipProvider 全部消失）', varCount >= 23, `count=${varCount}`)
   check('模板内容框是 textarea（长模板换行而非横向滚）', await js(win, `!!document.querySelector('textarea.font-mono')`))
+  check('标题模板名称旁有“设为默认”按钮', await js(win,
+    `!!document.querySelector('[data-probe=set-default-title-template]')`))
+  const titleContext = await js(win, `(()=>{const el=document.querySelector('main [draggable=true]');if(!el)return false;
+    const r=el.getBoundingClientRect();el.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:r.left+10,clientY:r.top+10}));return true})()`)
+  check('标题模板列表可以打开右键菜单', titleContext)
+  check('标题模板右键菜单有“设为默认”', await waitFor(win,
+    `[...document.querySelectorAll('[role=menuitem]')].some(x=>x.textContent.includes('设为默认'))`))
+  await pressKey(win, 'Escape')
   // 简繁两个标题变量要能在面板里点得到
   const titleVars = await js(
     win,
@@ -378,6 +400,8 @@ async function run(win) {
   await wait(600)
   const wDesc = await sideWidth('main .border-r')
   check('创建用于回归测试的简介模板', await clickByText(win, '添加简介模板', { exact: true }))
+  check('简介模板名称旁有“设为默认”按钮', await waitFor(win,
+    `document.querySelector('[data-probe=set-default-desc-template]')`))
   check('简介模板异步编辑器可以输入并实时预览', await editMarkdown(win, 'ABP desc roundtrip'))
   check('简介模板的异步 v-model 已保存', await waitFor(win,
     `window.api.loadStore().then(data => data.descTemplates.some(t => t.markdown.includes('ABP desc roundtrip')))`))
@@ -414,6 +438,8 @@ async function run(win) {
     '繁化姬「转繁体」按钮可见（曾因缺 TooltipProvider 消失）',
     await js(win, `[...document.querySelectorAll('button')].some(b=>b.textContent.includes('转繁体'))`)
   )
+  check('Mikan bangumiId 右侧有番剧搜索按钮', await js(win,
+    `!!document.querySelector('[data-probe=mikan-bangumi-search-open]')`))
   check('番剧标题模板是 textarea', await js(win, `document.querySelectorAll('textarea.font-mono').length >= 1`))
 
   // ---------- 番剧模板：Nyaa 更多项与种子名示例是两条独立折叠行 ----------
@@ -596,6 +622,26 @@ async function run(win) {
   )
   check('改动模板内容后自动变成「自定义」', afterEdit === '自定义', `label=${afterEdit}`)
 
+  // ---------- 显式默认模板只影响之后新建的番剧模板 ----------
+  check('切到标题模板设置默认项', await clickByText(win, '标题模板', { exact: true }))
+  check('将当前标题模板设为默认', await clickElementAt(win,
+    `document.querySelector('[data-probe=set-default-title-template]')`))
+  check('切到简介模板设置默认项', await clickByText(win, '简介模板', { exact: true }))
+  check('将当前简介模板设为默认', await clickElementAt(win,
+    `document.querySelector('[data-probe=set-default-desc-template]')`))
+  check('切回番剧模板', await clickByText(win, '番剧模板', { exact: true }))
+  check('再次打开“添加番剧模板”', await clickByText(win, '添加番剧模板'))
+  check('聚焦第二个模板的手动 bgmId', (await focusByPlaceholder(win, '手动输入')) !== null)
+  await typeText(win, '444634')
+  check('提交第二个番剧模板', await clickByText(win, '添加', { exact: true, last: true, root: 'body' }))
+  check('选中第二个番剧模板', await waitFor(win,
+    `[...document.querySelectorAll('main [draggable=true]')].some(x=>x.textContent.includes('bgm:444634'))`) &&
+    await clickElementAt(win, `[...document.querySelectorAll('main [draggable=true]')].find(x=>x.textContent.includes('bgm:444634'))`))
+  check('新番剧模板已复制默认标题模板', await waitFor(win,
+    `document.querySelector('main textarea.font-mono')?.value.includes('{{groupName}}')`))
+  check('新番剧模板已复制默认简介模板', await waitFor(win,
+    `document.querySelector('.md-editor .cm-content')?.textContent.includes('ABP desc roundtrip')`))
+
   // ---------- 左侧列表：可拖拽 + 右键菜单 ----------
   check('左侧模板项可拖拽排序', (await js(win, `document.querySelectorAll('[draggable=true]').length`)) >= 1)
   const ctxMenu = await js(
@@ -696,6 +742,16 @@ async function run(win) {
     "document.querySelector('.md-editor .cm-content')?.textContent.includes(" + JSON.stringify(undoMarker) + ")"))
   await nav(win, 4)
   check('切离模板页后编辑器不在当前页面', await waitFor(win, "!document.querySelector('.md-editor')"))
+  check('“更新预设”按钮常驻字幕识别设置', await waitFor(win,
+    `document.querySelector('[data-probe=update-subtitle-presets]')`))
+  check('点击“更新预设”', await clickByText(win, '更新预设', { exact: true }))
+  check('更新预设不会覆盖配置并给出结果', await waitFor(win,
+    `document.querySelector('[data-probe=subtitle-preset-message]')?.textContent.trim().length>0`))
+  check('点击“重置预设”会先弹出二次确认', await clickElementAt(win,
+    `document.querySelector('[data-probe=reset-subtitle-presets]')`) && await waitFor(win,
+    `document.querySelector('[role=alertdialog]')?.textContent.includes('确认重置字幕识别预设')`))
+  check('取消重置预设确认', await clickByText(win, '取消', { root: 'body', last: true }))
+  check('重置确认弹窗已关闭', await waitFor(win, `!document.querySelector('[role=alertdialog]')`))
   await nav(win, 1)
   check('切回模板页后编辑器恢复', await waitFor(win, "document.querySelector('.md-editor .cm-content')"))
   await js(win, "document.querySelector('.md-editor .cm-content')?.focus()")
@@ -870,6 +926,8 @@ async function run(win) {
     `document.querySelector('[data-probe=site-account-editor]')?.dataset.site==='acgrip'`))
   check('ACG.RIP 明示支持 tpx 链接和裸 Token', await waitFor(win,
     `document.querySelector('[data-probe=site-account-editor][data-site=acgrip]')?.textContent.includes('tpx://acg.rip/...')`))
+  check('ACG.RIP 提供联盟身份发布开关', await waitFor(win,
+    `document.querySelector('[data-probe=acgrip-publish-as-team] button[role=switch]')`))
 
   const cfgPath = path.join(sandbox, 'AniBT Publish', 'config.json')
   const secPath = path.join(sandbox, 'AniBT Publish', 'secrets.json')
@@ -903,6 +961,8 @@ async function run(win) {
   await typeText(win, '400602')
   check('提交新建', await clickByText(win, '添加', { exact: true, last: true, root: 'body' }))
   await wait(1400)
+  check('选中刚新建的发布流程模板', await clickElementAt(win,
+    `[...document.querySelectorAll('main [draggable=true]')].find(x=>x.textContent.includes('bgm:400602'))`))
   // 选发布组（前面建的 probegroup），否则发布会在「发布组未配置 API Key」就短路
   check('打开发布组下拉', await openSelectByText(win, '必须选择发布组'))
   await wait(700)
@@ -947,22 +1007,66 @@ async function run(win) {
   await wait(700)
   check(
     '给条目选中番剧模板',
-    await clickElementAt(win, `document.querySelectorAll('[role=option]')[0]`)
+    await clickElementAt(win, `[...document.querySelectorAll('[role=option]')].find(x=>x.textContent.includes('bgm:400602'))`)
   )
   await wait(800)
   check('点「下一步」进入阶段二', await clickByText(win, '下一步', { root: 'body' }))
   await wait(1000)
+  check('标题输入框下方固定显示完整种子文件名', await js(win,
+    `document.querySelector('[data-probe=final-torrent-filename]')?.textContent.includes('probe.torrent')`))
 
-  // ---------- 空标题必须在本地就被拦住 ----------
-  // 新建的番剧模板标题模板是空的，渲染出来的标题就是空串。
-  // 以前会照发不误，站点回一句 422「Invalid request body」，不说是哪个字段 ——
-  // 用户只看到一个红叉。现在：输入框标红 + 发布按钮按住。
-  const emptyTitle = await js(
-    win,
-    `(()=>{const i=document.querySelector('main input'); if(!i) return null
-      return {value:i.value, flagged:i.className.includes('border-destructive')}})()`
-  )
-  check('新建模板渲染出来的标题确实是空的', emptyTitle && emptyTitle.value === '', JSON.stringify(emptyTitle))
+  // ---------- 默认标题 + 空标题本地拦截 ----------
+  const generatedTitle = await js(win,
+    `document.querySelector('[data-probe=final-title-input]')?.value`)
+  check('显式设置默认后，新建番剧模板会生成标题', generatedTitle?.includes('[字幕组组名]') || generatedTitle?.includes('1080P'),
+    `value=${generatedTitle}`)
+  // 模板生成的标题要随最终发布字段即时重渲染。
+  await js(win, `(()=>{const i=document.querySelector('[data-probe=final-episode-input]');i.focus();i.select()})()`)
+  await typeText(win, '09')
+  check('修改集数会同步重渲染模板标题', await waitFor(win,
+    `document.querySelector('[data-probe=final-title-input]')?.value.includes(' - 09 - ')`))
+  // 返回阶段一修改识别字段，再进入阶段二：已有自动标题也必须继续联动。
+  check('从下一步返回上传首页', await clickByText(win, '上一步', { exact: true, root: 'body' }))
+  check('返回后首页配置行已挂载', await waitFor(win,
+    `document.querySelector('[data-probe=config-resolution-select]')`))
+  check('打开首页分辨率下拉', await openSelectBySelector(win,
+    '[data-probe=config-resolution-select]'))
+  check('首页分辨率改为 720p', await waitFor(win,
+    `[...document.querySelectorAll('[role=option]')].some(x=>x.textContent.trim()==='720p')`) &&
+    await clickElementAt(win, `[...document.querySelectorAll('[role=option]')].find(x=>x.textContent.trim()==='720p')`))
+  check('打开首页视频格式下拉', await openSelectBySelector(win,
+    '[data-probe=config-format-select]'))
+  check('首页视频格式改为 MP4', await waitFor(win,
+    `[...document.querySelectorAll('[role=option]')].some(x=>x.textContent.trim()==='MP4')`) &&
+    await clickElementAt(win, `[...document.querySelectorAll('[role=option]')].find(x=>x.textContent.trim()==='MP4')`))
+  check('首页视频格式已更新', await waitFor(win,
+    `document.querySelector('[data-probe=config-format-select]')?.textContent.includes('MP4')`))
+  check('打开首页字幕类型下拉', await openSelectBySelector(win,
+    '[data-probe=config-subtitle-type-select]'))
+  check('首页字幕类型改为无字幕', await waitFor(win,
+    `[...document.querySelectorAll('[role=option]')].some(x=>x.textContent.trim()==='无字幕')`) &&
+    await clickElementAt(win, `[...document.querySelectorAll('[role=option]')].find(x=>x.textContent.trim()==='无字幕')`))
+  const noSubtitleLanguage = await js(win,
+    `(()=>{const b=document.querySelector('[data-probe=config-language-select]')
+      return b?{disabled:b.disabled,text:b.textContent.replace(/\s+/g,' ').trim()}:null})()`)
+  check('无字幕会清空并禁用语言选择', noSubtitleLanguage?.disabled === true && noSubtitleLanguage.text === '—',
+    JSON.stringify(noSubtitleLanguage))
+  check('再次点下一步', await clickByText(win, '下一步', { exact: true, root: 'body' }))
+  const retitledFromConfig = await js(win,
+    `document.querySelector('[data-probe=final-title-input]')?.value`)
+  check('首页分辨率修改同步到下一步标题',
+    retitledFromConfig?.includes('720P') && !retitledFromConfig.includes('1080P'), `value=${retitledFromConfig}`)
+  check('无字幕标题不再带语言',
+    retitledFromConfig?.includes('无字幕') && !retitledFromConfig.includes('简繁日无字幕'), `value=${retitledFromConfig}`)
+  check('下一步的语言选择仍保持禁用', await js(win,
+    `document.querySelector('[data-probe=final-language-select]')?.disabled===true`))
+  // 手工清空标题；以前会照发不误，站点只回一句 422。
+  await js(win, `(()=>{const i=document.querySelector('[data-probe=final-title-input]');i.focus();i.select()})()`)
+  await pressKey(win, 'Backspace')
+  const emptyTitle = await js(win,
+    `(()=>{const i=document.querySelector('[data-probe=final-title-input]'); if(!i) return null
+      return {value:i.value, flagged:i.className.includes('border-destructive')}})()`)
+  check('手动清空后的标题为空', emptyTitle && emptyTitle.value === '', JSON.stringify(emptyTitle))
   check('空标题的输入框被标红', emptyTitle && emptyTitle.flagged === true, JSON.stringify(emptyTitle))
   const pubBtn = await js(
     win,
@@ -972,7 +1076,7 @@ async function run(win) {
   check('标题为空时发布按钮是禁用的', pubBtn && pubBtn.disabled === true, JSON.stringify(pubBtn))
 
   // 填上标题，按钮应当恢复
-  await js(win, `(()=>{const i=document.querySelector('main input'); i.focus(); i.select()})()`)
+  await js(win, `(()=>{const i=document.querySelector('[data-probe=final-title-input]'); i.focus(); i.select()})()`)
   await typeText(win, '[probe] Anime - 08 [1080p].mkv')
   await wait(700)
   const pubBtn2 = await js(
@@ -981,6 +1085,10 @@ async function run(win) {
       return b?{disabled:b.disabled}:null})()`
   )
   check('填上标题后发布按钮恢复可用', pubBtn2 && pubBtn2.disabled === false, JSON.stringify(pubBtn2))
+  await js(win, `(()=>{const i=document.querySelector('[data-probe=final-episode-input]');i.focus();i.select()})()`)
+  await typeText(win, '10')
+  check('手工修改过的标题不会被字段联动覆盖', await waitFor(win,
+    `document.querySelector('[data-probe=final-title-input]')?.value==='[probe] Anime - 08 [1080p].mkv'`))
 
   check('展开发布行的简介编辑器', await clickElementAt(win, `document.querySelector('main button[title="展开"]')`))
   check('发布行异步编辑器可以输入并实时预览', await editMarkdown(win, 'ABP publish roundtrip'))

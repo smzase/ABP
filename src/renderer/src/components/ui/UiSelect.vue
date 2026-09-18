@@ -28,6 +28,7 @@ defineProps<{
   contentClass?: string
   disabled?: boolean
   placeholder?: string
+  probe?: string
   /** 透传到 trigger，鼠标悬停提示 */
   title?: string
 }>()
@@ -37,6 +38,7 @@ const model = defineModel<string>({ default: '' })
 <template>
   <SelectRoot v-model="model" :disabled="disabled">
     <SelectTrigger
+      :data-probe="probe"
       :title="title"
       :class="
         cn(

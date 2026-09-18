@@ -9,29 +9,38 @@ import { detectSubtitle, DEFAULT_SUBTITLE_RULES } from './subtitle-detect.ts'
 const RESOLUTION_RE = /\b(2160|1080|720|480|360)[pP]\b|\b(4[Kk]|8[Kk])\b/
 
 /**
- * 集数识别按「信息量」排序：季集号、范围、显式标签、元数据分隔的单集。
+ * 集数只能来自有明确语法含义的位置，不能靠“看见 1~3 位数字”猜。
  *
- * 发布名里的数字不一定是集数：LV999、86 - Eighty Six、1080p 都很常见。
- * 规则因此只把紧邻元数据分隔符的数字当作单集，并且让范围（[01-13]）先于
- * 单集规则。这样合集不会被截成 01，标题里的 Lv999 也不会进入版本字段。
+ * Nyaa 的真实命名里很常见 `作品名 2 - 08`、`藤本树 17-26][07]`、
+ * `VIRGIN PUNK - 01 Clockwork Girl`。把任意两个数字间的横杠视为范围，会把
+ * 季数/标题数字吞进集数；取第一个范围又会让标题里的 17-26 抢走真正的 07。
  */
-const SEASON_EPISODE_RE = /\bS\d{1,2}[\s._-]?E(\d{1,3}(?:\.\d+)?)\b/i
-const EPISODE_RANGE_RE =
-  /(?:^|[\s\-_[\]【】(（])([0-9]{1,3}(?:\.\d+)?)[\s]*(?:[-~–—至到])[\s]*([0-9]{1,3}(?:\.\d+)?)(?=$|[\s\]】)）])/i
-const EXPLICIT_EPISODE_RE =
-  /(?:^|[\s[【(（\-_])(?:EP(?:ISODE)?|#)\s*[._-]?\s*([0-9]{1,3}(?:\.\d+)?)(?=\s*(?:$|\s|\]|】))/i
-const CHINESE_EPISODE_RE =
-  /(?:^|[\s[【(（\-_])第\s*([0-9]{1,3}(?:\.\d+)?)(?=\s*(?:集|話|话|$))/i
-const DELIMITED_EPISODE_RE =
-  /(?:^|[\s\-_[\]【】(（])([0-9]{1,3}(?:\.\d+)?)(?=\s*(?:$|[[\]【】)）\-_–—]))/i
-const EPISODE_VERSION_SUFFIX_RE =
-  /(?:^|[\s\-_[\]【】(（])([0-9]{1,3}(?:\.\d+)?)[\s._-]*[vV]\d+(?=\s*(?:$|[\s\]】)）\-_–—]))/i
+const EPISODE_NUMBER = String.raw`\d{1,3}(?:\.[05])?`
+const SEASON_EPISODE_RE = new RegExp(
+  String.raw`\bS\d{1,2}[\s._-]?E(${EPISODE_NUMBER})(?:[\s._-]*[vV](\d+))?\b`,
+  'i'
+)
+const EXPLICIT_EPISODE_RE = new RegExp(
+  String.raw`(?:^|[\s[【(（\-_])(?:EP(?:ISODE)?|#)\s*[._-]?\s*(${EPISODE_NUMBER})(?:[\s._-]*[vV](\d+))?(?=\s*(?:$|\s|\]|】))`,
+  'i'
+)
+const CHINESE_EPISODE_RE = new RegExp(
+  String.raw`(?:^|[\s[【(（\-_])第\s*(${EPISODE_NUMBER})(?=\s*(?:集|話|话|$))`,
+  'i'
+)
+const BRACKET_EPISODE_RE = new RegExp(
+  String.raw`[\[【]\s*(${EPISODE_NUMBER})(?:\s*[-~–—至到_]\s*(${EPISODE_NUMBER}))?(?:\s*[vV](\d+))?(?:\s*(?:[（(][^）)]*[）)]|精校合集|修正合集|合集|全集|完结|完結|END|FIN))*\s*[\]】]`,
+  'i'
+)
+const SPECIAL_EPISODE_RE = /[[【]\s*((?:OVA|OAD|SP|SPECIAL|EXTRA)(?:[\s._-]?\d{1,3})?)\s*[\]】]/i
+const DASH_EPISODE_RE = new RegExp(
+  String.raw`\s[-–—]\s*(${EPISODE_NUMBER})(?:\s*[（(]\s*\d{1,3}\s*[）)])?(?:[\s._-]*[vV](\d+))?(?=$|[\s[【(（])`,
+  'i'
+)
 
-/** 版本必须是显式修订标记：[V2]、(V2)、01v2 或紧跟集数/元数据分隔符的 v2。 */
-const BRACKET_VERSION_RE = /[[【(（]\s*[vV](\d+)\s*[\]】)）]/
-const TRAILING_VERSION_RE = /(?:[\]】)）])\s*[vV](\d+)(?!\d)/
-const EPISODE_SUFFIX_VERSION_RE =
-  /(?:\bS\d{1,2}[\s._-]?E\d{1,3}(?:\.\d+)?|(?:^|[\s\-_[\]【】(（])\d{1,3}(?:\.\d+)?)[\s._-]*[vV](\d+)(?!\d)/i
+/** 独立的 [V2] 或元数据块后的 V2；标题中的 “Show V2” 不是修订版本。 */
+const BRACKET_VERSION_RE = /[[【(（]\s*[vV](\d+)\s*[\]】)）]/i
+const TRAILING_VERSION_RE = /(?:[\]】)）])\s*[vV](\d+)(?!\d)/i
 
 const CODEC_RES: Array<[RegExp, string]> = [
   [/\b(HEVC|x\.?265|h\.?265)\b/i, 'HEVC'],
@@ -39,7 +48,7 @@ const CODEC_RES: Array<[RegExp, string]> = [
   [/\b(AV1)\b/i, 'AV1'],
   [/\b(VP9)\b/i, 'VP9']
 ]
-const BIT_DEPTH_RE = /\b(10|8)\s*-?\s*bit\b|\bHi10P\b/i
+const BIT_DEPTH_RE = /\b(16|12|10|8)\s*-?\s*bit\b|\bHi10P\b/i
 const AUDIO_RES: Array<[RegExp, string]> = [
   [/\bFLAC\b/i, 'FLAC'],
   [/\bOPUS\b/i, 'OPUS'],
@@ -74,49 +83,81 @@ function lastMatch(re: RegExp, s: string): RegExpExecArray | null {
   return last
 }
 
-function parseEpisode(name: string): string | null {
-  const season = SEASON_EPISODE_RE.exec(name)
-  if (season?.[1]) return season[1]
-
-  const range = EPISODE_RANGE_RE.exec(name)
-  if (range?.[1] && range[2]) return range[1] + '-' + range[2]
-
-  const explicit = lastMatch(EXPLICIT_EPISODE_RE, name)
-  if (explicit?.[1]) return explicit[1]
-
-  const chinese = lastMatch(CHINESE_EPISODE_RE, name)
-  if (chinese?.[1]) return chinese[1]
-
-  const suffix = lastMatch(EPISODE_VERSION_SUFFIX_RE, name)
-  if (suffix?.[1]) return suffix[1]
-
-  const delimited = lastMatch(DELIMITED_EPISODE_RE, name)
-  if (delimited?.[1]) return delimited[1]
-
-  return null
+interface EpisodeRevision {
+  episode: string | null
+  version: string | null
 }
 
-function parseVersion(name: string): string | null {
-  const bracket = BRACKET_VERSION_RE.exec(name)
+function normalizeSpecialEpisode(value: string): string {
+  return value.toUpperCase().replace(/[\s._-]+/g, '')
+}
+
+function parseEpisodeRevision(name: string): EpisodeRevision {
+  const season = lastMatch(SEASON_EPISODE_RE, name)
+  if (season?.[1]) return { episode: season[1], version: season[2] ? 'v' + season[2] : null }
+
+  const explicit = lastMatch(EXPLICIT_EPISODE_RE, name)
+  if (explicit?.[1]) return { episode: explicit[1], version: explicit[2] ? 'v' + explicit[2] : null }
+
+  const chinese = lastMatch(CHINESE_EPISODE_RE, name)
+  if (chinese?.[1]) return { episode: chinese[1], version: null }
+
+  // 取最后一个完整的数字块。[藤本树 17-26][07] 应当得到 07，而非标题里的范围。
+  const bracket = lastMatch(BRACKET_EPISODE_RE, name)
+  if (bracket?.[1]) {
+    return {
+      episode: bracket[2] ? `${bracket[1]}-${bracket[2]}` : bracket[1],
+      version: bracket[3] ? 'v' + bracket[3] : null
+    }
+  }
+
+  const special = lastMatch(SPECIAL_EPISODE_RE, name)
+  if (special?.[1]) return { episode: normalizeSpecialEpisode(special[1]), version: null }
+
+  // 横杠本身是槽位分隔符，只取右侧数字；绝不把左侧标题数字拼成范围。
+  const dash = lastMatch(DASH_EPISODE_RE, name)
+  if (dash?.[1]) return { episode: dash[1], version: dash[2] ? 'v' + dash[2] : null }
+
+  return { episode: null, version: null }
+}
+
+function parseVersion(name: string, episodeVersion: string | null): string | null {
+  const bracket = lastMatch(BRACKET_VERSION_RE, name)
   if (bracket?.[1]) return 'v' + bracket[1]
 
-  const suffix = EPISODE_SUFFIX_VERSION_RE.exec(name)
-  if (suffix?.[1]) return 'v' + suffix[1]
+  if (episodeVersion) return episodeVersion
 
-  const trailing = TRAILING_VERSION_RE.exec(name)
+  const trailing = lastMatch(TRAILING_VERSION_RE, name)
   if (trailing?.[1]) return 'v' + trailing[1]
 
   return null
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** 已匹配模板时先屏蔽番剧别名，解决标题本身就是 86/100/365 等数字的歧义。 */
+function maskKnownTitles(name: string, knownTitles: string[]): string {
+  let masked = name.normalize('NFKC')
+  const titles = knownTitles
+    .map((title) => title.normalize('NFKC').trim())
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length)
+  for (const title of titles) masked = masked.replace(new RegExp(escapeRegExp(title), 'giu'), ' ')
+  return masked
+}
+
 export function parseFileName(
   fileName: string,
-  rules: SubtitleDetectRule[] = DEFAULT_SUBTITLE_RULES
+  rules: SubtitleDetectRule[] = DEFAULT_SUBTITLE_RULES,
+  knownTitles: string[] = []
 ): ParsedName {
   // 去扩展名；torrent 内部名常常还带一层视频扩展名。
-  const name = fileName.replace(/\.(torrent|mkv|mp4|avi|webm)$/i, '')
+  const rawName = fileName.replace(/\.(torrent|mkv|mp4|avi|webm)$/i, '')
+  const name = maskKnownTitles(rawName, knownTitles)
 
-  const episode = parseEpisode(name)
+  const episodeRevision = parseEpisodeRevision(name)
 
   const resHit = RESOLUTION_RE.exec(name)
   const resolution = resHit ? (resHit[1] ? resHit[1] + 'p' : resHit[2].toUpperCase().replace('K', 'K')) : null
@@ -148,22 +189,25 @@ export function parseFileName(
     }
   }
 
-  const version = parseVersion(name)
+  const version = parseVersion(name, episodeRevision.version)
 
-  const formatHit = /\.(mkv|mp4|avi|webm)\b/i.exec(fileName)
-  const sub = detectSubtitle(name, rules)
+  const extensionFormat = /\.(mkv|mp4|avi|webm)\b/i.exec(fileName)
+  const metadataFormat = /(?:^|[\s[【_-])(mkv|mp4|avi|webm)(?=$|[\s\]】_-])/i.exec(rawName)
+  const format = extensionFormat?.[1] ?? metadataFormat?.[1] ?? null
+  const sub = detectSubtitle(rawName, rules)
+  const subtitleType = sub.subtitleType ?? (/\b(?:ASS|SRT)\s*[x×]\s*\d+\b/i.test(rawName) ? 'EMBEDDED' : null)
 
   return {
-    episode,
+    episode: episodeRevision.episode,
     resolution,
     codec,
     bitDepth,
     audioCodec,
     source,
-    format: formatHit ? formatHit[1].toUpperCase() : null,
+    format: format ? format.toUpperCase() : null,
     version,
     languages: sub.languages,
-    subtitleType: sub.subtitleType
+    subtitleType
   }
 }
 

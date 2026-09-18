@@ -35,7 +35,7 @@ const templateId = computed({
 })
 
 function patch(p: Partial<PublishEntry>): void {
-  store.replaceEntry({ ...props.entry, ...p })
+  store.patchEntryAndSyncTitle(props.entry.id, p)
 }
 
 function onResolution(v: string): void {
@@ -62,6 +62,11 @@ function onFormat(v: string): void {
 function onFormatBlur(): void {
   if (!props.entry.format) customFormat.value = false
   else patch({ format: props.entry.format.toUpperCase() })
+}
+
+function onSubtitleType(value: string): void {
+  const subtitleType = value as PublishEntry['subtitleType']
+  patch(subtitleType === 'NONE' ? { subtitleType, languages: [] } : { subtitleType })
 }
 
 function remove(): void {
@@ -92,7 +97,12 @@ function remove(): void {
 
     <!-- 分辨率 -->
     <template v-if="!customResolution">
-      <UiSelect :model-value="entry.resolution" class="w-28" @update:model-value="onResolution">
+      <UiSelect
+        probe="config-resolution-select"
+        :model-value="entry.resolution"
+        class="w-28"
+        @update:model-value="onResolution"
+      >
         <UiSelectItem v-for="r in RESOLUTIONS" :key="r" :value="r">{{ r }}</UiSelectItem>
         <UiSelectItem :value="CUSTOM">{{ t('common.custom') }}</UiSelectItem>
       </UiSelect>
@@ -108,7 +118,12 @@ function remove(): void {
 
     <!-- 格式 -->
     <template v-if="!customFormat">
-      <UiSelect :model-value="entry.format" class="w-24" @update:model-value="onFormat">
+      <UiSelect
+        probe="config-format-select"
+        :model-value="entry.format"
+        class="w-24"
+        @update:model-value="onFormat"
+      >
         <UiSelectItem v-for="f in VIDEO_FORMATS" :key="f" :value="f">{{ f }}</UiSelectItem>
         <UiSelectItem :value="CUSTOM">{{ t('common.custom') }}</UiSelectItem>
       </UiSelect>
@@ -123,12 +138,22 @@ function remove(): void {
     />
 
     <!-- 字幕类型 -->
-    <UiSelect :model-value="entry.subtitleType" class="w-28" @update:model-value="(v: string) => patch({ subtitleType: v as typeof entry.subtitleType })">
+    <UiSelect
+      probe="config-subtitle-type-select"
+      :model-value="entry.subtitleType"
+      class="w-28"
+      @update:model-value="onSubtitleType"
+    >
       <UiSelectItem v-for="s in SUBTITLE_TYPES" :key="s" :value="s">{{ t(SUBTITLE_TYPE_I18N_KEY[s]) }}</UiSelectItem>
     </UiSelect>
 
     <!-- 字幕语言 -->
-    <LanguageMultiSelect :model-value="entry.languages" @update:model-value="(v: string[]) => patch({ languages: v })" />
+    <LanguageMultiSelect
+      probe="config-language-select"
+      :disabled="entry.subtitleType === 'NONE'"
+      :model-value="entry.languages"
+      @update:model-value="(v: string[]) => patch({ languages: v })"
+    />
 
     <!-- 移除 -->
     <button

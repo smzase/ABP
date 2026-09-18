@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { nextTick, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Pencil, Trash2, GripVertical } from '@lucide/vue'
+import { Pencil, Trash2, GripVertical, Star } from '@lucide/vue'
 import UiContextMenu from '@renderer/components/ui/UiContextMenu.vue'
 import UiContextMenuItem from '@renderer/components/ui/UiContextMenuItem.vue'
 import { cn } from '@renderer/lib/utils.ts'
@@ -29,12 +29,14 @@ const props = defineProps<{
   /** 番剧模板的卡片有副标题，行高更高 */
   variant?: 'plain' | 'card'
   emptyText: string
+  defaultId?: string | null
 }>()
 
 const emit = defineEmits<{
   select: [id: string]
   rename: [id: string, name: string]
   remove: [id: string]
+  setDefault: [id: string]
   reorder: [from: number, to: number]
 }>()
 
@@ -145,6 +147,7 @@ void props
               <span :class="cn('min-w-0 flex-1 truncate', variant === 'card' && 'text-sm font-medium')">
                 {{ item.label }}
               </span>
+              <Star v-if="defaultId === item.id" class="h-3.5 w-3.5 shrink-0 fill-primary text-primary" :title="t('tpl.defaultTemplate')" />
             </div>
             <div v-if="item.sub" class="mt-0.5 truncate pl-5 text-xs text-muted-foreground">{{ item.sub }}</div>
           </button>
@@ -152,6 +155,10 @@ void props
 
         <UiContextMenuItem @select="startRename(item)">
           <Pencil class="h-3.5 w-3.5" /> {{ t('tpl.rename') }}
+        </UiContextMenuItem>
+        <UiContextMenuItem v-if="defaultId !== undefined" @select="emit('setDefault', item.id)">
+          <Star class="h-3.5 w-3.5" :class="defaultId === item.id && 'fill-current'" />
+          {{ defaultId === item.id ? t('tpl.defaultTemplate') : t('tpl.setDefault') }}
         </UiContextMenuItem>
         <UiContextMenuItem destructive @select="emit('remove', item.id)">
           <Trash2 class="h-3.5 w-3.5" /> {{ t('common.delete') }}

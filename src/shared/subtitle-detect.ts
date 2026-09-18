@@ -1,6 +1,10 @@
 import { sortLanguages } from './constants.ts'
 import type { LanguageCode, SubtitleDetectRule, SubtitleType } from './types.ts'
 
+/** 旧版配置没有版本字段；它们对应 v1 的预设集合。 */
+export const LEGACY_SUBTITLE_PRESET_VERSION = 1
+export const SUBTITLE_PRESET_VERSION = 2
+
 /**
  * 字幕识别：按用户词库把文件名里的「词」映射为字幕语言 + 字幕类型。
  * 匹配规则：忽略大小写、包含匹配、长词优先（避免 CHS 抢先于 CHS_JP）。
@@ -22,11 +26,15 @@ export const DEFAULT_SUBTITLE_RULES: SubtitleDetectRule[] = [
   { word: '简繁日内封', langs: ['CHS', 'CHT', 'JP'], type: 'EMBEDDED' },
   { word: '簡繁日內封', langs: ['CHS', 'CHT', 'JP'], type: 'EMBEDDED' },
   { word: '简繁日内嵌', langs: ['CHS', 'CHT', 'JP'], type: 'INTERNAL' },
+  { word: '簡繁日內嵌', langs: ['CHS', 'CHT', 'JP'], type: 'INTERNAL' },
   { word: '简繁日外挂', langs: ['CHS', 'CHT', 'JP'], type: 'EXTERNAL' },
+  { word: '簡繁日外掛', langs: ['CHS', 'CHT', 'JP'], type: 'EXTERNAL' },
   { word: '简繁内封', langs: ['CHS', 'CHT'], type: 'EMBEDDED' },
   { word: '簡繁內封', langs: ['CHS', 'CHT'], type: 'EMBEDDED' },
   { word: '简繁内嵌', langs: ['CHS', 'CHT'], type: 'INTERNAL' },
+  { word: '簡繁內嵌', langs: ['CHS', 'CHT'], type: 'INTERNAL' },
   { word: '简繁外挂', langs: ['CHS', 'CHT'], type: 'EXTERNAL' },
+  { word: '簡繁外掛', langs: ['CHS', 'CHT'], type: 'EXTERNAL' },
   { word: '简日内封', langs: ['CHS', 'JP'], type: 'EMBEDDED' },
   { word: '简日内嵌', langs: ['CHS', 'JP'], type: 'INTERNAL' },
   { word: '简日外挂', langs: ['CHS', 'JP'], type: 'EXTERNAL' },
@@ -38,11 +46,13 @@ export const DEFAULT_SUBTITLE_RULES: SubtitleDetectRule[] = [
   { word: '简体内嵌', langs: ['CHS'], type: 'INTERNAL' },
   { word: '简体内封', langs: ['CHS'], type: 'EMBEDDED' },
   { word: '简体外挂', langs: ['CHS'], type: 'EXTERNAL' },
+  { word: '簡體外掛', langs: ['CHS'], type: 'EXTERNAL' },
   { word: '繁体内嵌', langs: ['CHT'], type: 'INTERNAL' },
   { word: '繁體內嵌', langs: ['CHT'], type: 'INTERNAL' },
   { word: '繁体内封', langs: ['CHT'], type: 'EMBEDDED' },
   { word: '繁體內封', langs: ['CHT'], type: 'EMBEDDED' },
   { word: '繁体外挂', langs: ['CHT'], type: 'EXTERNAL' },
+  { word: '繁體外掛', langs: ['CHT'], type: 'EXTERNAL' },
 
   // ---- 纯语言组合词（不含类型） ----
   { word: '简繁日', langs: ['CHS', 'CHT', 'JP'], type: null },
@@ -114,6 +124,61 @@ export const DEFAULT_SUBTITLE_RULES: SubtitleDetectRule[] = [
   { word: '無字幕', langs: [], type: 'NONE' },
   { word: 'RAW', langs: [], type: 'NONE' }
 ]
+
+interface SubtitlePresetUpdate {
+  version: number
+  rules: SubtitleDetectRule[]
+}
+
+/**
+ * 版本更新只列出新加入的规则，不携带旧预设全集。
+ * 这样用户删除或改写过的旧规则不会被“更新预设”恢复或覆盖。
+ */
+const SUBTITLE_PRESET_UPDATES: SubtitlePresetUpdate[] = [
+  {
+    version: 2,
+    rules: [
+      { word: '簡繁日內嵌', langs: ['CHS', 'CHT', 'JP'], type: 'INTERNAL' },
+      { word: '簡繁日外掛', langs: ['CHS', 'CHT', 'JP'], type: 'EXTERNAL' },
+      { word: '簡繁內嵌', langs: ['CHS', 'CHT'], type: 'INTERNAL' },
+      { word: '簡繁外掛', langs: ['CHS', 'CHT'], type: 'EXTERNAL' },
+      { word: '簡體外掛', langs: ['CHS'], type: 'EXTERNAL' },
+      { word: '繁體外掛', langs: ['CHT'], type: 'EXTERNAL' }
+    ]
+  }
+]
+
+export interface SubtitlePresetUpdateResult {
+  rules: SubtitleDetectRule[]
+  presetVersion: number
+  added: number
+}
+
+/** 增量合并客户端新增预设；同名用户规则优先，绝不覆盖用户内容。 */
+export function updateSubtitlePresets(
+  rules: SubtitleDetectRule[],
+  presetVersion: number
+): SubtitlePresetUpdateResult {
+  // 渲染层传入的是 Vue 响应式数组；structuredClone 不接受 Proxy。
+  const next = rules.map((rule) => ({
+    word: rule.word,
+    langs: [...rule.langs],
+    type: rule.type
+  }))
+  const knownWords = new Set(next.map((rule) => rule.word.trim().toLocaleUpperCase()))
+  let added = 0
+  for (const update of SUBTITLE_PRESET_UPDATES) {
+    if (update.version <= presetVersion) continue
+    for (const rule of update.rules) {
+      const key = rule.word.trim().toLocaleUpperCase()
+      if (knownWords.has(key)) continue
+      next.push({ word: rule.word, langs: [...rule.langs], type: rule.type })
+      knownWords.add(key)
+      added++
+    }
+  }
+  return { rules: next, presetVersion: SUBTITLE_PRESET_VERSION, added }
+}
 
 export interface SubtitleDetectResult {
   languages: LanguageCode[]

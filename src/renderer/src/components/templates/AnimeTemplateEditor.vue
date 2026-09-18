@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Trash2, Languages, Loader2, AlertCircle, ChevronDown } from '@lucide/vue'
+import { Trash2, Languages, Loader2, AlertCircle, ChevronDown, Search } from '@lucide/vue'
 import { CollapsibleRoot, CollapsibleTrigger, CollapsibleContent } from 'reka-ui'
 import { useAppStore } from '@renderer/stores/app.ts'
 import UiInput from '@renderer/components/ui/UiInput.vue'
@@ -12,13 +12,14 @@ import UiSelectItem from '@renderer/components/ui/UiSelectItem.vue'
 import UiSwitch from '@renderer/components/ui/UiSwitch.vue'
 import UiCard from '@renderer/components/ui/UiCard.vue'
 import UiTooltip from '@renderer/components/ui/UiTooltip.vue'
+import UiDialog from '@renderer/components/ui/UiDialog.vue'
 import { confirm } from '@renderer/lib/confirm.ts'
 import { cn } from '@renderer/lib/utils.ts'
 import { renderTemplate } from '@shared/template.ts'
 import { RESOLUTIONS, SUBTITLE_TYPES, VIDEO_FORMATS } from '@shared/types.ts'
 import { SUBTITLE_TYPE_I18N_KEY } from '@shared/constants.ts'
 import LanguageMultiSelect from '@renderer/components/LanguageMultiSelect.vue'
-import type { AnimeFilenameExample, LanguageCode, SubtitleType, TitleVariant } from '@shared/types.ts'
+import type { AnimeFilenameExample, LanguageCode, MikanSearchItem, SubtitleType, TitleVariant } from '@shared/types.ts'
 
 const UiMarkdownEditor = defineAsyncComponent(() => import('@renderer/components/ui/UiMarkdownEditor.vue'))
 
@@ -61,6 +62,46 @@ watch(mikanBangumiIdText, (value) => {
   tpl.value.mikanBangumiId = value.trim() !== '' && Number.isInteger(parsed) && parsed > 0 ? parsed : null
   touch()
 })
+
+const mikanSearchOpen = ref(false)
+const mikanSearchQuery = ref('')
+const mikanSearching = ref(false)
+const mikanSearched = ref(false)
+const mikanSearchError = ref('')
+const mikanSearchResults = ref<MikanSearchItem[]>([])
+
+function openMikanSearch(): void {
+  if (!tpl.value) return
+  mikanSearchQuery.value = tpl.value.names.zh || tpl.value.names.native || tpl.value.names.romaji || tpl.value.names.en
+  mikanSearchResults.value = []
+  mikanSearched.value = false
+  mikanSearchError.value = ''
+  mikanSearchOpen.value = true
+}
+
+async function searchMikanBangumi(): Promise<void> {
+  const query = mikanSearchQuery.value.trim()
+  if (!query) return
+  mikanSearching.value = true
+  mikanSearchError.value = ''
+  try {
+    const response = await window.api.searchMikan('bangumi', query)
+    mikanSearchResults.value = response.ok ? (response.data ?? []) : []
+    mikanSearchError.value = response.ok ? '' : (response.error ?? t('common.empty'))
+    mikanSearched.value = true
+  } catch (error) {
+    mikanSearchResults.value = []
+    mikanSearchError.value = String(error)
+    mikanSearched.value = true
+  } finally {
+    mikanSearching.value = false
+  }
+}
+
+function pickMikanBangumi(item: MikanSearchItem): void {
+  mikanBangumiIdText.value = String(item.id)
+  mikanSearchOpen.value = false
+}
 
 const selectedGroup = computed(() => app.data.groups.find((group) => group.id === tpl.value?.groupId))
 const needsBgmId = computed(() => app.data.settings.publishMode === 'anibt' || selectedGroup.value?.sites.anibt.enabled === true)
@@ -284,10 +325,17 @@ async function remove(): Promise<void> {
 
         <div class="flex flex-col gap-1.5">
           <UiLabel>{{ t('tpl.mikanBangumiId') }} <template v-if="needsMikanId">*</template></UiLabel>
-          <div class="relative">
-            <UiInput v-model="mikanBangumiIdText" :class="cn(missingMikanId && 'border-destructive')" placeholder="3599" />
-            <UiTooltip v-if="missingMikanId" :content="t('tpl.needMikanBangumiId')">
-              <AlertCircle class="absolute right-2.5 top-2.5 h-4 w-4 text-destructive" />
+          <div class="flex gap-1.5">
+            <div class="relative min-w-0 flex-1">
+              <UiInput v-model="mikanBangumiIdText" :class="cn(missingMikanId && 'border-destructive')" placeholder="3599" />
+              <UiTooltip v-if="missingMikanId" :content="t('tpl.needMikanBangumiId')">
+                <AlertCircle class="absolute right-2.5 top-2.5 h-4 w-4 text-destructive" />
+              </UiTooltip>
+            </div>
+            <UiTooltip :content="t('tpl.searchMikanBangumi')">
+              <UiButton variant="outline" size="icon" data-probe="mikan-bangumi-search-open" @click="openMikanSearch">
+                <Search class="h-4 w-4" />
+              </UiButton>
             </UiTooltip>
           </div>
         </div>
@@ -488,6 +536,45 @@ async function remove(): Promise<void> {
         </CollapsibleContent>
       </CollapsibleRoot>
     </UiCard>
+
+    <UiDialog v-model:open="mikanSearchOpen" :title="t('tpl.searchMikanBangumi')">
+      <div class="flex gap-2">
+        <UiInput
+          v-model="mikanSearchQuery"
+          :placeholder="t('tpl.mikanSearchPlaceholder')"
+          data-probe="mikan-bangumi-search-input"
+          @keydown.enter="searchMikanBangumi"
+        />
+        <UiButton :disabled="mikanSearching || !mikanSearchQuery.trim()" @click="searchMikanBangumi">
+          <Loader2 v-if="mikanSearching" class="h-4 w-4 animate-spin" />
+          <Search v-else class="h-4 w-4" />
+          {{ t('common.search') }}
+        </UiButton>
+      </div>
+      <div class="max-h-72 overflow-y-auto rounded-md border" data-probe="mikan-bangumi-search-results">
+        <button
+          v-for="item in mikanSearchResults"
+          :key="item.id"
+          class="flex w-full cursor-pointer items-center justify-between gap-3 border-b px-3 py-2 text-left last:border-b-0 hover:bg-accent"
+          @click="pickMikanBangumi(item)"
+        >
+          <span class="min-w-0">
+            <span class="block truncate text-sm font-medium">{{ item.name }}</span>
+            <span v-if="item.secondaryName && item.secondaryName !== item.name" class="block truncate text-xs text-muted-foreground">
+              {{ item.secondaryName }}
+            </span>
+          </span>
+          <span class="shrink-0 font-mono text-xs text-muted-foreground">Mikan:{{ item.id }}</span>
+        </button>
+        <div v-if="mikanSearchError" class="p-4 text-center text-xs text-destructive">{{ mikanSearchError }}</div>
+        <div v-else-if="mikanSearched && mikanSearchResults.length === 0" class="p-4 text-center text-xs text-muted-foreground">
+          {{ t('common.empty') }}
+        </div>
+        <div v-else-if="!mikanSearched" class="p-4 text-center text-xs text-muted-foreground">
+          {{ t('tpl.mikanSearchHint') }}
+        </div>
+      </div>
+    </UiDialog>
 
     <!-- ② 标题模板（简/繁/简繁） -->
     <UiCard class="p-4">

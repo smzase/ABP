@@ -20,9 +20,10 @@ import type {
 } from '../shared/types.ts'
 import * as anibt from './anibt.ts'
 import { applyProxyToSession, getProxy } from './proxy.ts'
-import { buildMikanRequestBody } from '../shared/mikan.ts'
+import { buildMikanRequestBody, parseMikanSearchItems } from '../shared/mikan.ts'
 import { parseTorrent } from '../shared/bencode.ts'
 import {
+  acgripPostAsTeamValue,
   normalizeAcgripToken,
   SITE_URLS,
   siteConfigurationError,
@@ -346,6 +347,8 @@ async function publishAcgrip(
   appendFile(form, 'post[torrent]', torrent)
   form.append('post[title]', payload.title)
   form.append('post[content]', formatDescription('acgrip', payload.descriptionMd))
+  const postAsTeam = acgripPostAsTeamValue(account)
+  if (postAsTeam) form.append('post[post_as_team]', postAsTeam)
   const response = await net.fetch(account.apiUrl || 'https://acg.rip/api/post', {
     method: 'POST',
     headers: { 'X-API-TOKEN': normalizeAcgripToken(account.apiToken) },
@@ -437,17 +440,7 @@ export async function searchMikan(kind: MikanSearchKind, query: string): Promise
   try {
     const response = await net.fetch(`https://api.mikanani.me/api/${kind}/search/${encodeURIComponent(q)}`)
     if (!response.ok) return { ok: false, error: await errorText(response) }
-    const rows = (await response.json()) as Array<Record<string, unknown>>
-    const idKey = kind === 'bangumi' ? 'BangumiId' : kind === 'subtitleGroup' ? 'SubtitleGroupId' : 'PublishGroupId'
-    return {
-      ok: true,
-      data: rows.flatMap((row) => {
-        const id = Number(row[idKey])
-        const name = String(row.Name ?? row.ChsName ?? row.JpnName ?? '')
-        if (!Number.isInteger(id) || !name) return []
-        return [{ id, name, secondaryName: typeof row.JpnName === 'string' ? row.JpnName : undefined }]
-      })
-    }
+    return { ok: true, data: parseMikanSearchItems(kind, await response.json()) }
   } catch (error) {
     return { ok: false, error: String(error) }
   }

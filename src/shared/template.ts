@@ -72,6 +72,7 @@ export function subtitleLangZhTag(
 ): string {
   const langNames = traditional ? LANG_ZH_TRAD : LANG_ZH
   const subtitleNames = traditional ? SUBTITLE_TYPE_ZH_TRAD : SUBTITLE_TYPE_ZH
+  if (type === 'NONE') return subtitleNames.NONE
   const langs = sortLanguages(languages)
     .map((l) => langNames[l] ?? l)
     .join('')
@@ -92,6 +93,7 @@ export function renderTemplate(template: string, ctx: TemplateContext): string {
   const zhHans = ctx.titleZhHans ?? ctx.titleZh ?? ''
   // 繁体名没填就回落简体：模板里写了 {{titleZhHant}} 却渲染出空标题，比字没转繁更糟
   const zhHant = (ctx.titleZhHant ?? '').trim() || zhHans
+  const effectiveLanguages = ctx.subtitleType === 'NONE' ? [] : (ctx.languages ?? [])
   const values: Record<string, string> = {
     groupName: ctx.groupName ?? '',
     titleZh: ctx.titleZh ?? '',
@@ -114,8 +116,8 @@ export function renderTemplate(template: string, ctx: TemplateContext): string {
     audioCodec: ctx.audioCodec ?? '',
     source: ctx.source ?? '',
     customTags: (ctx.customTags ?? []).join(' '),
-    languageCode: languageCodeTag(ctx.languages ?? []),
-    subtitleLangZh: subtitleLangZhTag(ctx.languages ?? [], ctx.subtitleType, ctx.traditionalizeTitle === true)
+    languageCode: languageCodeTag(effectiveLanguages),
+    subtitleLangZh: subtitleLangZhTag(effectiveLanguages, ctx.subtitleType, ctx.traditionalizeTitle === true)
   }
   // 变量名大小写不敏感：{{titlezhhans}} / {{TitleZhHans}} 都认。
   // 变量是手打进模板里的，为一个大小写让人对着「原样输出的 {{...}}」发愣不值当。
