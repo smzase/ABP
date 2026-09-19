@@ -87,7 +87,9 @@ export function unavailableCredentialCheck(
 
 export function defaultSiteAccount(site: PublishSite): SiteAccountConfig {
   return {
-    enabled: site === 'anibt',
+    // In local mode every site starts disabled; AniBT mode forces this row on
+    // in the account editor without changing the user's local-mode preference.
+    enabled: false,
     apiKey: '',
     apiUrl: site === 'acgrip' ? 'https://acg.rip/api/post' : '',
     apiToken: '',

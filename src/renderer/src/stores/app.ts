@@ -1,10 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
-import type { AppData } from '@shared/types.ts'
+import type { AppData, DashboardBounds, SiteLoginResult } from '@shared/types.ts'
 import { defaultAppData } from '@shared/store-doc.ts'
 import { toPlain } from '@shared/plain.ts'
 import { ACCENT_PRESETS, DEFAULT_ACCENT } from '@shared/constants.ts'
 import { i18n } from '@renderer/i18n/index.ts'
+import { fontStack } from '@shared/font.ts'
+import { initDashboardMenus, updateDashboardMenuSettings } from '@renderer/lib/dashboard-overlay.ts'
 
 /**
  * 根数据 store：整个 AppData 一份，渲染进程深度 watch 防抖落盘。
@@ -13,12 +15,24 @@ import { i18n } from '@renderer/i18n/index.ts'
 export const useAppStore = defineStore('app', () => {
   const data = ref<AppData>(defaultAppData())
   const loaded = ref(false)
+  const webBusy = ref(false)
+  const webResult = ref<{ ok: boolean; message: string } | null>(null)
+
+  initDashboardMenus(action => {
+    if (action.type === 'theme') setThemeMode(action.value)
+    else if (action.type === 'locale') setLocale(action.value)
+    else setAccent(action.value)
+  })
+  watch(() => [data.value.settings.appearance, data.value.settings.locale], () => {
+    updateDashboardMenuSettings(toPlain({ appearance: data.value.settings.appearance, locale: data.value.settings.locale }))
+  }, { immediate: true, deep: true })
 
   async function load(): Promise<void> {
     data.value = await window.api.loadStore()
     loaded.value = true
     applyAppearance()
     applyLocale()
+    void window.api.setAnibtWebLocale(data.value.settings.locale)
   }
 
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -42,6 +56,7 @@ export const useAppStore = defineStore('app', () => {
     const color = /^#[0-9a-fA-F]{6}$/.test(accent) ? accent : DEFAULT_ACCENT
     document.documentElement.style.setProperty('--primary', color)
     document.documentElement.style.setProperty('--ring', color)
+    document.documentElement.style.setProperty('--app-font-family', fontStack(data.value.settings.appearance.fontFamily))
   }
 
   function applyLocale(): void {
@@ -55,23 +70,59 @@ export const useAppStore = defineStore('app', () => {
     applyAppearance()
   }
 
+  watch(() => data.value.settings.appearance.mode, mode => {
+    void window.api.setAnibtDashboardTheme(mode)
+  })
+
+  async function webAction(action: 'login' | 'check' | 'logout' | 'clear', bounds?: DashboardBounds): Promise<void> {
+    if (webBusy.value) return
+    webBusy.value = true
+    webResult.value = null
+    try {
+      if (action === 'login' || action === 'check') {
+        const result: SiteLoginResult = action === 'login'
+          ? await window.api.loginAnibtWeb(toPlain(data.value.anibtWebAccount), data.value.settings.appearance.mode, toPlain(bounds!))
+          : await window.api.checkAnibtWeb()
+        data.value.anibtWebAccount.cookies = result.cookies
+        data.value.anibtWebAccount.userAgent = result.userAgent
+        webResult.value = { ok: result.ok, message: result.message ?? '' }
+      } else {
+        await window.api.logoutAnibtWeb(action === 'clear')
+        data.value.anibtWebAccount.cookies = []
+        webResult.value = { ok: true, message: i18n.global.t(action === 'clear' ? 'webAccount.cleared' : 'webAccount.loggedOut') }
+      }
+    } catch (error) {
+      webResult.value = { ok: false, message: String(error) }
+    } finally { webBusy.value = false }
+  }
+
   function setAccent(accent: string): void {
     data.value.settings.appearance.accent = accent
+    applyAppearance()
+  }
+
+  function setFontFamily(family: string): void {
+    data.value.settings.appearance.fontFamily = family
     applyAppearance()
   }
 
   function setLocale(locale: 'zh-CN' | 'zh-TW' | 'en'): void {
     data.value.settings.locale = locale
     applyLocale()
+    void window.api.setAnibtWebLocale(locale)
   }
 
   return {
     data,
     loaded,
+    webBusy,
+    webResult,
+    webAction,
     load,
     applyAppearance,
     setThemeMode,
     setAccent,
+    setFontFamily,
     setLocale,
     accentPresets: ACCENT_PRESETS
   }

@@ -4,6 +4,8 @@
  * 只能用「可擦除」TS 语法 —— 禁止 enum / namespace / 参数属性。
  */
 
+import type { DashboardMenuAction, DashboardMenuRequest, DashboardMenuSettings } from './dashboard-menu.ts'
+
 // ---------- 枚举（const 对象 + 联合类型） ----------
 
 /** 字幕类型：外挂 / 内封 / 内嵌 / 无字幕。值与 AniBT 发布接口对齐 */
@@ -51,6 +53,8 @@ export interface ProxySettings {
 
 export interface AppearanceSettings {
   mode: ThemeMode
+  /** 本机字体家族名；空字符串使用系统默认字体。 */
+  fontFamily: string
   /** 主题色（hex），默认 #fb7299 */
   accent: string
 }
@@ -120,6 +124,8 @@ export interface SiteAccountConfig {
 
 export type SiteAccounts = Record<PublishSite, SiteAccountConfig>
 
+export type AnibtWebAccount = Pick<SiteAccountConfig, 'username' | 'password' | 'cookies' | 'userAgent'>
+
 export interface GroupAccount {
   id: string
   name: string
@@ -178,6 +184,7 @@ export interface AnimeTemplate {
   /** Mikan 自有 Bangumi ID，与 bgm.tv subject id 无关。 */
   mikanBangumiId: number | null
   names: AnimeNames
+  customTags: string[]
   /** 必选：发布用组（GroupAccount.id） */
   groupId: string
   /** 每次发布默认启用 Nyaa 代发 */
@@ -231,6 +238,7 @@ export interface PublishRecord {
 
 export interface AppData {
   version: 1
+  anibtWebAccount: AnibtWebAccount
   settings: Settings
   groups: GroupAccount[]
   titleTemplates: TitleTemplate[]
@@ -412,6 +420,14 @@ export interface SiteConnectionResult {
   error?: string
 }
 
+/** 主窗口内嵌 AniBT 页面在渲染进程视口中的位置。 */
+export interface DashboardBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 export interface DeleteResult {
   ok: boolean
   state?: 'pending' | 'completed' | 'failed'
@@ -430,6 +446,10 @@ export interface IpcChannels {
   'store:load': () => Promise<AppData>
   'store:save': (data: AppData) => Promise<void>
   'store:openDir': () => Promise<string>
+  'store:getDir': () => Promise<string>
+  'store:pickDir': () => Promise<string | null>
+  'store:changeDir': (directory: string, data: AppData) => Promise<string>
+  'system:listFonts': () => Promise<string[]>
   'window:minimize': () => Promise<void>
   'window:toggleMaximize': () => Promise<void>
   'window:close': () => Promise<void>
@@ -443,6 +463,25 @@ export interface IpcChannels {
   'anibt:publish': (payload: PublishPayload) => Promise<PublishResult>
   'anibt:deleteRelease': (apiKey: string, releaseId: string) => Promise<DeleteResult>
   'anibt:deletionStatus': (apiKey: string, releaseId: string) => Promise<DeleteResult>
+  'anibt:webLogin': (account: AnibtWebAccount, themeMode: ThemeMode, bounds: DashboardBounds) => Promise<SiteLoginResult>
+  'anibt:cancelWebLogin': () => Promise<void>
+  'anibt:setWebLoginBounds': (bounds: DashboardBounds) => Promise<void>
+  'anibt:webCheck': () => Promise<SiteLoginResult>
+  'anibt:webLogout': (clearAll: boolean) => Promise<void>
+  /** 主窗口内嵌网页，没有 preload 或 Node.js 权限。 */
+  'anibt:openDashboard': (bounds: DashboardBounds, themeMode: ThemeMode) => Promise<void>
+  'anibt:setDashboardBounds': (bounds: DashboardBounds) => Promise<void>
+  'anibt:setDashboardVisible': (visible: boolean) => Promise<void>
+  'anibt:showDashboardMenu': (request: DashboardMenuRequest) => Promise<boolean>
+  'anibt:hideDashboardMenu': (id?: string) => Promise<void>
+  'anibt:updateDashboardMenu': (settings: DashboardMenuSettings) => Promise<void>
+  'anibt:dashboardMenuPainted': (id: string, size: { width: number; height: number }) => Promise<void>
+  'anibt:dashboardMenuHidden': (id: string) => Promise<void>
+  'anibt:dashboardMenuAction': (id: string, action: DashboardMenuAction) => Promise<void>
+  'anibt:reloadDashboard': () => Promise<void>
+  'anibt:setWebLocale': (locale: Locale) => Promise<void>
+  'anibt:setDashboardTheme': (themeMode: ThemeMode) => Promise<void>
+  'anibt:closeDashboard': () => Promise<void>
   'local:publish': (payload: LocalPublishPayload) => Promise<LocalPublishResult>
   'local:removeArchive': (recordId: string) => Promise<void>
   'site:login': (groupId: string, site: PublishSite, account: SiteAccountConfig, captchaCode: string) => Promise<SiteLoginResult>

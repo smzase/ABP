@@ -4,24 +4,21 @@ import { useI18n } from 'vue-i18n'
 import { Captions, Globe, FolderOpen } from '@lucide/vue'
 import SubtitleDetectSettings from '@renderer/components/settings/SubtitleDetectSettings.vue'
 import ProxySettings from '@renderer/components/settings/ProxySettings.vue'
-import UiButton from '@renderer/components/ui/UiButton.vue'
+import OtherSettings from '@renderer/components/settings/OtherSettings.vue'
 import { cn } from '@renderer/lib/utils.ts'
 
-/** 设置：左侧二级侧边栏（字幕识别 / 代理 / 数据） */
+/** 设置：左侧二级侧边栏（字幕识别 / 代理 / 其他） */
 const { t } = useI18n()
 
-type Section = 'detect' | 'proxy' | 'data'
+type Section = 'detect' | 'proxy' | 'other'
 const section = ref<Section>('detect')
 
 const SECTIONS: Array<{ key: Section; icon: typeof Captions; labelKey: string }> = [
   { key: 'detect', icon: Captions, labelKey: 'settings.subtitleDetect' },
   { key: 'proxy', icon: Globe, labelKey: 'settings.proxy' },
-  { key: 'data', icon: FolderOpen, labelKey: 'settings.dataSection' }
+  { key: 'other', icon: FolderOpen, labelKey: 'settings.other' }
 ]
 
-function openConfigDir(): void {
-  void window.api.openConfigDir()
-}
 </script>
 
 <template>
@@ -50,16 +47,7 @@ function openConfigDir(): void {
     <div class="min-w-0 flex-1 overflow-y-auto p-4">
       <SubtitleDetectSettings v-if="section === 'detect'" />
       <ProxySettings v-else-if="section === 'proxy'" />
-      <div v-else class="flex flex-col gap-3">
-        <h3 class="font-medium">{{ t('settings.dataSection') }}</h3>
-        <p class="text-sm text-muted-foreground">{{ t('settings.configDirHint') }}</p>
-        <p class="max-w-2xl text-sm text-muted-foreground">{{ t('settings.secretsHint') }}</p>
-        <div>
-          <UiButton variant="outline" @click="openConfigDir">
-            <FolderOpen class="h-4 w-4" /> {{ t('settings.openConfigDir') }}
-          </UiButton>
-        </div>
-      </div>
+      <OtherSettings v-else />
     </div>
   </div>
 </template>

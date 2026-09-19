@@ -104,7 +104,7 @@ export function renderTemplate(template: string, ctx: TemplateContext): string {
     titleNative: ctx.titleNative ?? '',
     ep: epRaw ? padEpisode(epRaw) : '',
     epRaw,
-    version: (ctx.version ?? '').trim() || DEFAULT_VERSION,
+    version: versionSuffix(ctx.version).slice(1, -1),
     versionSuffix: versionSuffix(ctx.version),
     resolution: ctx.resolution ?? '',
     resolutionUpper: (ctx.resolution ?? '').toUpperCase(),
@@ -163,9 +163,9 @@ export const TEMPLATE_VARIABLE_GROUPS: TemplateVariableGroup[] = [
     key: 'title',
     labelKey: 'tplVar.title',
     vars: [
+      { name: 'titleZh', note: '中文名（跟随标题变体和繁化开关）' },
       { name: 'titleZhHans', note: '中文名（简体）' },
       { name: 'titleZhHant', note: '中文名（繁体，未填则回落简体）' },
-      { name: 'titleZh', note: '中文名（等同简体）' },
       { name: 'titleRomaji', note: '罗马音' },
       { name: 'titleEn', note: '英文名' },
       { name: 'titleNative', note: '作品原名（如日文）' }
@@ -177,7 +177,7 @@ export const TEMPLATE_VARIABLE_GROUPS: TemplateVariableGroup[] = [
     vars: [
       { name: 'ep', note: '集数（默认前补 0，如 1 → 01）' },
       { name: 'epRaw', note: '原始集数（不补 0）' },
-      { name: 'version', note: '版本（默认 v1，v1 也会显示）' },
+      { name: 'version', note: '版本（v1 不显示，v2 及以上显示）' },
       { name: 'versionSuffix', note: '版本后缀标签（如 [v2]，v1 不显示）' }
     ]
   },

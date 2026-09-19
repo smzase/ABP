@@ -50,12 +50,22 @@ $env:ELECTRON_RUN_AS_NODE=$null; $env:NODE_OPTIONS=""
 - API Key、API Token、账号密码、Cookie、User-Agent 只存本地 `secrets.json`（加密），
   不进 `config.json`、不进仓库、不进日志
 - `dependencies` 保持为空（全部 bundle，asar 无 node_modules）
-- 不在标题栏写项目名；不改配置目录位置；shared 层不引入 Electron/DOM API
+- 不在标题栏写项目名；不擅自改默认配置目录；shared 层不引入 Electron/DOM API
+  设置→其他可显式修改数据目录：复制并校验 config.json、加密 secrets.json、pending-torrents，
+  成功后才更新原默认目录内的 data-location.json。目标必须为空且不能与当前目录互相包含，
+  保留原数据，不覆盖现有文件。保存与迁移通过同一写队列串行执行。
+  字体在设置→其他按需枚举本机字体，支持搜索，保存 appearance.fontFamily；不在启动时枚举，
+  不打包字体文件。通过 --app-font-family 应用，独立仪表盘菜单也同步；空值使用系统默认。
+  字体搜索放在选择列表内部；FontSelect 使用 reka-ui Combobox + ComboboxVirtualizer，
+  只挂载可见行及少量缓冲，不全量渲染或逐行加载字体。选项用客户端当前字体，选中后预览。
+  离线探针使用一万条字体名称检查虚拟渲染、筛选、滚动及键盘选择。
 - 外观默认**浅色**（`#fafafa`）；`index.html` 上不要留 `class="dark"`
 
 ## 本地直发约定
 
 - 标题栏 `AniBT / 本地`：AniBT 是默认主发布，本地是备用直发；发布记录按模式隔离。
+  新建组的本地站点全部默认关闭（包括 AniBT）。主模式的 AniBT 强制开启仅影响当前行为，
+  不得改写本地 enabled 偏好；已有显式开关和旧版账号迁移保持原行为。
 - 支持 8 站：AniBT、蜜柑计划、Nyaa、动漫花园、末日动漫、AcgnX、萌番组、ACG.RIP。
   AniBT 用 API Key；蜜柑用 MikanHash Token；Nyaa 仅使用账号密码调用 `/api/upload`
   Basic Auth API，不保留网页登录 Cookie 后备；动漫花园/萌番组支持账号密码登录、隔离
@@ -63,6 +73,34 @@ $env:ELECTRON_RUN_AS_NODE=$null; $env:NODE_OPTIONS=""
   “打开网页登录”才创建独立窗口；萌番组调用 signin API）；
   末日动漫/AcgnX 用 UID + API Token；ACG.RIP 用 API URL + `X-API-TOKEN`，输入既支持
   裸 Token 也支持 `tpx://acg.rip/<token>`，请求前必须剥离前缀。
+- AniBT 模式侧栏在仪表盘上方单列“AniBT账号”，不再放在站点账号内，也不依赖发布组。
+  `AppData.anibtWebAccount` 的凭据和 Cookie 均存入加密 secrets.json，旧组内网页账号迁移一次。
+  `main/anibt-web.ts` 管理独立 `persist:abp-anibt-web` 会话：先检查真实会话，已登录直接返回，
+  不再打开会因重定向报 ERR_FAILED 的登录页。账号页用沙盒 WebContentsView 仅展示原站 CAP
+  验证码与错误提示，保留原始域名、React 表单及验证码票据流程，无 Node/preload，不伪造或
+  自动解验证码。通过原生 input setter 和事件填写表单，等待用户验证后提交；只有
+  `/api/auth/get-session` 返回 user/session 才确认成功并刷新缓存仪表盘。
+  取消或离开账号页立即销毁验证视图；验证码 Cookie 不能当作登录凭证。禁止用
+  `redirect:manual` 检查 `/groups`（Electron 会报 Redirect was cancelled）。
+  退出调用 `/api/auth/sign-out`，清 Cookie 额外清除此会话的存储和缓存。
+- 仪表盘用无 Node/preload 的 WebContentsView 内嵌在主窗口内容区；标题栏右侧显示
+  “AniBT账号”和“刷新”，页面内不重复显示标题。尺寸跟随页面，离开路由只隐藏并
+  缓存 15 分钟，切到本地模式、退出账号或关闭应用时销毁。仪表盘侧栏浮窗和 Tooltip 使用
+  `main/dashboard-menu.ts` 的独立本地 WebContentsView，先定位、置顶，再显示第一帧。
+  不准再截图/隐藏网页来让浮窗置顶，这会冻结画面；CSS z-index 也无法盖过原生视图。
+  菜单有专用沙盒 preload，只提供布局/设置动作，不接收秘密，复用 SidebarMenuContent.vue，
+  设置仍由主应用 store 管理。离开仪表盘释放菜单渲染器，网页缓存保留。
+  更新设置时不要重复挂载已在顶层的菜单；关闭时先移出原生视图树再隐藏，否则可能让下层
+  网页遗留为 hidden 状态并吞掉鼠标输入。仪表盘显示时关闭绘制节流，缓存时恢复。
+  隐藏视图不一定产生动画帧，不要等待它的 requestAnimationFrame 才显示。
+  入场动画在原生视图定位、置顶、显示后启动，退场等 animationend 再移除；减少动态效果时
+  立即确认。回调必须检查请求 ID，防止旧退场关闭新菜单；路由卸载仍立即释放。
+  探针必须覆盖首帧层级、菜单保持打开时的实际主题像素和语言、所有收起态侧栏提示。
+  网页主题跟随客户端，更新
+  AniBT 的 localStorage.theme、根节点 class/colorScheme/颜色，不能刷新网页导致表单丢失。
+  真窗口测试的所有会话必须离线拦截；用模拟认证站点测试登录、取消、内嵌和主题，不访问真实账号。
+  客户端语言同步到 AniBT 的 host-only `PARAGLIDE_LOCALE` Cookie（zh-CN→zh、zh-TW→zh-Hant、en→en），
+  已加载的仪表盘/登录页刷新一次应用新语言；重复选择同语言不刷新，不能清掉登录 Cookie。
 - 简介源始终为 Markdown：AniBT/Nyaa 原样；动漫花园/末日动漫/AcgnX/萌番组转 HTML；
   蜜柑转 BBCode；ACG.RIP 用 `[markdown]` 与 `[/markdown]` 包裹。
 - 蜜柑的 `bangumiId` 不是 bgm.tv 的 `bgmId`；与 `subtitleGroupId` 成对发送。
@@ -71,6 +109,9 @@ $env:ELECTRON_RUN_AS_NODE=$null; $env:NODE_OPTIONS=""
   必须按返回的 `BangumiUrl` subject id（旧响应才用完整标题）核对，不能盲取第一条。
 - ACG.RIP 联盟发布字段是 `post[post_as_team]=1`，关闭时不发送。
 - 标题/简介模板只有用户显式“设为默认”后，才会在新建番剧模板时复制进去；未设默认仍留空。
+  已设默认时，星标按钮和右键菜单均可“取消默认”，不修改已建番剧模板的内容。
+  AniBT 验证码区域初始为 324×88 CSS 像素；错误提示放在组件下方，按需增加高度，消失后收回，
+  不得把错误浮层盖到验证码上导致无法再次点击。
 - 失败的本地发布会把种子缓存到 `pending-torrents`，供记录页单站/多站重试；
   全部成功后才删除。
 - 凭据检查不能把“HTTP 可达”冒充认证成功：ACG.RIP、末日动漫、AcgnX 都没有无副作用
@@ -98,6 +139,7 @@ $env:ELECTRON_RUN_AS_NODE=$null; $env:NODE_OPTIONS=""
 6. **下拉框一律用 `UiSelect` + `UiSelectItem`，不准用原生 `<select>`/`<option>`**。
    原生的弹出的是操作系统列表：直角、系统配色、不跟主题、没动画。
    占位文案走 `placeholder` 属性（reka-ui 把空字符串留给「清空选中」了）。
+   可搜索的字体列表使用 FontSelect（reka-ui Combobox + 虚拟列表），不使用原生选择框。
 7. **Tailwind v4 的 `translate` 是独立属性，不在 `transform` 里**。
    `-translate-x-1/2` 编译成 `translate: ...`，关键帧里再写 `transform: translate(-50%,-50%)`
    会**叠加**成 -100%，弹窗就先闪现在左上角再跳回中间。
@@ -146,5 +188,8 @@ $env:ELECTRON_RUN_AS_NODE=$null; $env:NODE_OPTIONS=""
 - `{{titleZhHans}}`/`{{titleZhHant}}` 是明确的简/繁；`{{titleZh}}` 跟着标题变体走。
   变量名大小写不敏感
 - 新建番剧模板的标题模板与简介**一律空白**，`sanitizeAppData` 也不准回填
+- 可仅以中文名创建番剧模板，发布时仍按站点验证所需 ID。信息页的 Bangumi 搜索仅改 bgmId。
+  模板的 customTags 复用发布页 UiTagInput，复制有序数组到发布条目，不共用引用。
+  变量面板把 titleZh 放在 titleZhHans/titleZhHant 前；version 和 versionSuffix 均隐藏 v1。
 
 改完 UI 记得 `npm run build && npm run probe` —— 上面这几类问题只有真窗口能抓到。

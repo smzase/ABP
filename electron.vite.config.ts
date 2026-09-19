@@ -28,7 +28,7 @@ export default defineConfig({
     build: {
       minify: 'esbuild',
       rollupOptions: {
-        input: { index: resolve('src/preload/index.ts') }
+        input: { index: resolve('src/preload/index.ts'), 'dashboard-menu': resolve('src/preload/dashboard-menu.ts') }
       }
     }
   },
@@ -45,7 +45,7 @@ export default defineConfig({
     build: {
       minify: 'esbuild',
       rollupOptions: {
-        input: { index: resolve('src/renderer/index.html') },
+        input: { index: resolve('src/renderer/index.html'), 'dashboard-menu': resolve('src/renderer/dashboard-menu.html') },
         output: {
           // Keep shared Vue code out of lazy editor chunks, otherwise startup imports them too.
           onlyExplicitManualChunks: true,

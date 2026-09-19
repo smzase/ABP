@@ -1,6 +1,7 @@
 import os from 'node:os'
 import path from 'node:path'
 import { app } from 'electron'
+import { DataDirectory } from './data-directory.ts'
 
 /**
  * 配置文件目录约定：
@@ -8,7 +9,7 @@ import { app } from 'electron'
  * - macOS：~/Library/Application Support/AniBT Publish
  * - Linux：$XDG_CONFIG_HOME/anibt-publish（默认 ~/.config/anibt-publish）
  */
-export function getConfigDir(): string {
+function getDefaultConfigDir(): string {
   if (process.platform === 'win32') {
     return path.join(app.getPath('documents'), 'AniBT Publish')
   }
@@ -17,6 +18,19 @@ export function getConfigDir(): string {
   }
   const xdg = process.env.XDG_CONFIG_HOME
   return path.join(xdg && xdg.length > 0 ? xdg : path.join(os.homedir(), '.config'), 'anibt-publish')
+}
+
+let dataDirectory: DataDirectory | undefined
+function directories(): DataDirectory {
+  return dataDirectory ??= new DataDirectory(getDefaultConfigDir())
+}
+
+export function getConfigDir(): string {
+  return directories().get()
+}
+
+export function changeConfigDir(directory: string): string {
+  return directories().change(directory)
 }
 
 export function getConfigFile(): string {

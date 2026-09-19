@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { TooltipProvider } from 'reka-ui'
 import TitleBar from '@renderer/components/layout/TitleBar.vue'
 import SideBar from '@renderer/components/layout/SideBar.vue'
@@ -7,6 +8,11 @@ import UiConfirmDialog from '@renderer/components/ui/UiConfirmDialog.vue'
 import { useAppStore } from '@renderer/stores/app.ts'
 
 const app = useAppStore()
+const currentRoute = useRoute()
+const router = useRouter()
+watch(() => [app.data.settings.publishMode, currentRoute.meta.anibtOnly], () => {
+  if (app.data.settings.publishMode === 'local' && currentRoute.meta.anibtOnly) void router.replace('/publish')
+})
 
 /**
  * 窗口级拖放兜底：把文件拖到发布区以外的地方时，Chromium 默认会「导航」到该文件，

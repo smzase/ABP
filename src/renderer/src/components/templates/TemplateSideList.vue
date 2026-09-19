@@ -158,7 +158,7 @@ void props
         </UiContextMenuItem>
         <UiContextMenuItem v-if="defaultId !== undefined" @select="emit('setDefault', item.id)">
           <Star class="h-3.5 w-3.5" :class="defaultId === item.id && 'fill-current'" />
-          {{ defaultId === item.id ? t('tpl.defaultTemplate') : t('tpl.setDefault') }}
+          {{ defaultId === item.id ? t('tpl.clearDefault') : t('tpl.setDefault') }}
         </UiContextMenuItem>
         <UiContextMenuItem destructive @select="emit('remove', item.id)">
           <Trash2 class="h-3.5 w-3.5" /> {{ t('common.delete') }}

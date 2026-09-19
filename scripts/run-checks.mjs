@@ -4,6 +4,11 @@
  * 运行：node scripts/run-checks.mjs
  */
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { DataDirectory } from '../src/main/data-directory.ts'
+import { fontStack, DEFAULT_FONT_STACK } from '../src/shared/font.ts'
 import {
   renderTemplate,
   padEpisode,
@@ -42,6 +47,7 @@ import {
   selectMikanBangumiMatch
 } from '../src/shared/mikan.ts'
 import { PUBLISH_SITES } from '../src/shared/types.ts'
+import { isAnibtWebUrl, hasAnibtWebSession } from '../src/shared/anibt-web.ts'
 import {
   defaultSiteAccount,
   acgripPostAsTeamValue,
@@ -68,6 +74,64 @@ function ok(name, fn) {
 }
 
 console.log('template:')
+ok('version 变量默认/v1 留空，v2+ 正常显示，变量名忽略大小写', () => {
+  for (const version of [undefined, '', 'v1', ' V1 ']) {
+    assert.equal(renderTemplate('E{{ep}}{{version}}', { ep: '8', version }), 'E08')
+  }
+  assert.equal(renderTemplate('E{{ep}}{{VERSION}}', { ep: '8', version: 'v2' }), 'E08v2')
+  assert.equal(renderTemplate('{{version}} {{versionSuffix}}', { version: 'v12' }), 'v12 [v12]')
+})
+ok('模板标签和字体持久化：兼容缺省字段并保留标签顺序', () => {
+  const clean = sanitizeAppData({ animeTemplates: [{ names: { zh: '测试番剧' }, customTags: ['WEB', 'HDR', 'WEB', ''] }], settings: { appearance: { fontFamily: 'Noto Sans CJK SC' } } })
+  assert.deepEqual(clean.animeTemplates[0].customTags, ['WEB', 'HDR'])
+  assert.equal(clean.settings.appearance.fontFamily, 'Noto Sans CJK SC')
+  assert.deepEqual(sanitizeAppData({ animeTemplates: [{}] }).animeTemplates[0].customTags, [])
+  assert.equal(sanitizeAppData({}).settings.appearance.fontFamily, '')
+  assert.equal(fontStack(''), DEFAULT_FONT_STACK)
+  assert.equal(fontStack('Font "Quoted"'), '"Font \\"Quoted\\"", ' + DEFAULT_FONT_STACK)
+})
+ok('数据目录：迁移验证、原目录保留、重启定位与重复迁移', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'abp-dir-check-'))
+  try {
+    const source = path.join(root, 'default'), target = path.join(root, 'custom'), second = path.join(root, 'second')
+    for (const dir of [source, target, second]) fs.mkdirSync(dir)
+    fs.writeFileSync(path.join(source, 'config.json'), '{"version":1}')
+    const encrypted = JSON.stringify(sealSecrets({ group: { anibt: { apiKey: 'test-only-key' } } }))
+    fs.writeFileSync(path.join(source, 'secrets.json'), encrypted)
+    fs.mkdirSync(path.join(source, 'pending-torrents'))
+    fs.writeFileSync(path.join(source, 'pending-torrents', 'retry.torrent'), Buffer.from([0, 255, 12]))
+    const dirs = new DataDirectory(source)
+    assert.equal(dirs.get(), source)
+    assert.equal(dirs.change(target), fs.realpathSync(target))
+    assert.equal(fs.readFileSync(path.join(target, 'secrets.json'), 'utf8'), encrypted)
+    assert.deepEqual(fs.readFileSync(path.join(target, 'pending-torrents', 'retry.torrent')), Buffer.from([0, 255, 12]))
+    assert.ok(fs.existsSync(path.join(source, 'config.json')))
+    assert.equal(new DataDirectory(source).get(), fs.realpathSync(target))
+    assert.equal(dirs.change(target), fs.realpathSync(target))
+    assert.equal(dirs.change(second), fs.realpathSync(second))
+    assert.equal(new DataDirectory(source).get(), fs.realpathSync(second))
+    assert.ok(!fs.existsSync(path.join(second, 'data-location.json')))
+  } finally { fs.rmSync(root, { recursive: true, force: true }) }
+})
+ok('数据目录：拒绝非空/嵌套路径，不覆盖文件或切换定位', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'abp-dir-invalid-'))
+  try {
+    const source = path.join(root, 'default'), occupied = path.join(root, 'occupied'), nested = path.join(source, 'nested')
+    fs.mkdirSync(nested, { recursive: true }); fs.mkdirSync(occupied)
+    fs.writeFileSync(path.join(occupied, 'config.json'), 'keep')
+    const dirs = new DataDirectory(source)
+    assert.throws(() => dirs.change(occupied), /DATA_DIR_NOT_EMPTY/)
+    assert.throws(() => dirs.change(nested), /DATA_DIR_RELATED/)
+    assert.throws(() => dirs.change(root), /DATA_DIR_RELATED/)
+    assert.throws(() => dirs.change('relative'))
+    assert.equal(fs.readFileSync(path.join(occupied, 'config.json'), 'utf8'), 'keep')
+    assert.equal(new DataDirectory(source).get(), source)
+    fs.writeFileSync(path.join(source, 'data-location.json'), '{broken')
+    assert.throws(() => new DataDirectory(source).get())
+    fs.writeFileSync(path.join(source, 'data-location.json'), '{"directory":"relative"}')
+    assert.throws(() => new DataDirectory(source).get(), /Invalid data directory/)
+  } finally { fs.rmSync(root, { recursive: true, force: true }) }
+})
 ok('ep 补零', () => {
   assert.equal(padEpisode('1'), '01')
   assert.equal(padEpisode('08'), '08')
@@ -167,6 +231,29 @@ ok('种子标题自动匹配番剧模板，长名称优先', () => {
   ]
   assert.equal(matchAnimeTemplateId('[Group] 葬送的芙莉莲 - 01.torrent', '葬送のフリーレン - 01', templates), 'long')
   assert.equal(matchAnimeTemplateId('[Group] Unknown Show - 01.torrent', 'Unknown Show - 01', templates), '')
+})
+ok('数据目录：复制中途失败仍保留原目录，符号链接不能引出迁移范围', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'abp-dir-failure-'))
+  const originalCopy = fs.cpSync
+  try {
+    const source = path.join(root, 'default'), target = path.join(root, 'target'), linked = path.join(root, 'linked')
+    for (const dir of [source, target, linked]) fs.mkdirSync(dir)
+    fs.writeFileSync(path.join(source, 'config.json'), '{"version":1}')
+    fs.writeFileSync(path.join(source, 'secrets.json'), 'encrypted-fixture')
+    const dirs = new DataDirectory(source)
+    fs.cpSync = (from, to, options) => {
+      if (path.basename(from) === 'secrets.json') throw new Error('Simulated disk failure')
+      return originalCopy(from, to, options)
+    }
+    assert.throws(() => dirs.change(target), /Simulated disk failure/)
+    fs.cpSync = originalCopy
+    assert.equal(new DataDirectory(source).get(), source)
+    assert.equal(fs.readFileSync(path.join(source, 'config.json'), 'utf8'), '{"version":1}')
+    assert.equal(fs.readFileSync(path.join(source, 'secrets.json'), 'utf8'), 'encrypted-fixture')
+    fs.symlinkSync(linked, path.join(source, 'pending-torrents'), process.platform === 'win32' ? 'junction' : 'dir')
+    assert.throws(() => dirs.change(linked), /symbolic link/)
+    assert.equal(dirs.get(), source)
+  } finally { fs.cpSync = originalCopy; fs.rmSync(root, { recursive: true, force: true }) }
 })
 ok('无字幕模板忽略残留语言，不能生成“简繁日无字幕”', () => {
   assert.equal(
@@ -518,6 +605,18 @@ ok('畸形输入：缺 info 的种子', () => {
 })
 
 console.log('site accounts:')
+ok('本地站点默认关闭，配置往返保留用户手动开关', () => {
+  const sites = Object.fromEntries(PUBLISH_SITES.map(site => [site, defaultSiteAccount(site)]))
+  let data = sanitizeAppData({ groups: [{ id: 'new-group', name: 'new', sites }] })
+  assert.ok(PUBLISH_SITES.every(site => !data.groups[0].sites[site].enabled))
+  data.groups[0].sites.anibt.enabled = true
+  assert.equal(sanitizeAppData(data).groups[0].sites.anibt.enabled, true)
+  data.groups[0].sites.anibt.enabled = false
+  assert.equal(sanitizeAppData(data).groups[0].sites.anibt.enabled, false)
+  data = sanitizeAppData({ groups: [{ id: 'incomplete', sites: {} }] })
+  assert.equal(data.groups[0].sites.anibt.enabled, false)
+  assert.equal(sanitizeAppData({ groups: [{ id: 'legacy', apiKey: 'test' }] }).groups[0].sites.anibt.enabled, true)
+})
 ok('空账号不会检查通过，每个站点都有明确的缺失配置提示', () => {
   for (const site of PUBLISH_SITES) {
     assert.ok(siteConfigurationError(site, defaultSiteAccount(site)).length > 0, site)
@@ -665,6 +764,28 @@ ok('toPlain 是深拷贝，改副本不影响原对象', () => {
 })
 
 console.log('secrets-crypto:')
+ok('AniBT 网页会话：验证码 Cookie、空对象、畸形返回均不代表登录成功', () => {
+  for (const bad of [null, undefined, '', 123, [], {}, { user: {} }, { user: { id: 'u' } }, { user: { id: 1 }, session: { id: 's' } }, { user: { id: 'u' }, session: { id: '' } }]) {
+    assert.equal(hasAnibtWebSession(bad), false)
+  }
+  assert.equal(hasAnibtWebSession({ user: { id: 'u' }, session: { id: 's' } }), true)
+  assert.equal(isAnibtWebUrl('https://anibt.net/groups'), true)
+  for (const url of ['https://anibt.net.evil.test', 'http://anibt.net', 'file:///groups', 'javascript:alert(1)', 'invalid']) assert.equal(isAnibtWebUrl(url), false)
+})
+ok('独立 AniBT 网页账号在没有发布组时仍可加密还原，损坏 Cookie 可安全回退', () => {
+  const original = { username: 'probe@example.invalid', password: 'probe-password', userAgent: 'probe-ua',
+    cookies: [{ name: 'session', value: 'web-secret', domain: 'anibt.net', path: '/', secure: true, httpOnly: true }] }
+  const secrets = openSecrets(sealSecrets(collectSecrets([], original)))
+  const restored = defaultAppData().anibtWebAccount
+  mergeSecrets([], secrets, restored)
+  assert.deepEqual(restored, original)
+  assert.equal(sanitizeAppData({ anibtWebAccount: original }).anibtWebAccount.password, original.password)
+  for (const bad of ['{', 'null', '42', '[null,{},"garbage"]']) {
+    const doc = defaultAppData()
+    mergeSecrets([], { 'anibtWeb/cookies': bad }, doc.anibtWebAccount)
+    assert.deepEqual(sanitizeAppData(doc).anibtWebAccount.cookies, [])
+  }
+})
 ok('往返：封好再解开还是原样', () => {
   const map = { g1: 'abp_live_key_1', g2: '第二组的 key' }
   assert.deepEqual(openSecrets(sealSecrets(map)), map)

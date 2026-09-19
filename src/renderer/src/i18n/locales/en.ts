@@ -4,7 +4,16 @@ export default {
     templates: 'Templates',
     accounts: 'Accounts',
     records: 'Records',
-    settings: 'Settings'
+    settings: 'Settings',
+    anibtWebAccount: 'AniBT account',
+    dashboard: 'Subtitle group dashboard'
+  },
+  webAccount: {
+    hint: 'This account is separate from publishing groups. Click Log in, then complete human verification below. The app submits the login and verifies your session automatically.',
+    waiting: 'Processing. Complete human verification if it is displayed below.',
+    loggedOut: 'Signed out of AniBT web',
+    cleared: 'AniBT web cookies and cache cleared',
+    reload: 'Refresh'
   },
   common: {
     add: 'Add',
@@ -97,6 +106,8 @@ export default {
     notesTooLong: 'Description exceeds the {max} character limit'
   },
   tpl: {
+    manualName: 'Enter a Chinese title manually',
+    searchBgmId: 'Search bgmId',
     titleTemplates: 'Title Templates',
     descTemplates: 'Description Templates',
     animeTemplates: 'Anime Templates',
@@ -143,6 +154,7 @@ export default {
     deleteConfirm: 'Delete this template?',
     rename: 'Rename',
     setDefault: 'Set as default',
+    clearDefault: 'Clear default',
     defaultTemplate: 'Default template',
     listHint: 'Right-click to rename, set the default, or delete; drag to reorder',
     useTitleTpl: 'Apply title template',
@@ -182,7 +194,7 @@ export default {
     titleNative: 'Native title (e.g. Japanese)',
     ep: 'Episode, zero-padded (1 → 01)',
     epRaw: 'Episode as typed, no padding',
-    version: 'Version (defaults to v1; v1 is shown)',
+    version: 'Version (hidden for v1; shown for v2 and above)',
     versionSuffix: 'Version suffix tag (e.g. [v2]; hidden for v1)',
     resolution: 'Resolution, lowercase p (e.g. 1080p)',
     resolutionUpper: 'Resolution, uppercase P (e.g. 1080P)',
@@ -224,6 +236,7 @@ export default {
     disabled: 'Disabled',
     enabledCount: '{count} site(s) enabled',
     username: 'Username / email',
+    email: 'Email',
     password: 'Password',
     showSecret: 'Show password',
     hideSecret: 'Hide password',
@@ -231,6 +244,7 @@ export default {
     identityName: 'Publishing identity / team',
     identityHint: 'Must match the site exactly',
     login: 'Log in',
+    logout: 'Log out',
     loggingIn: 'Logging in',
     openLogin: 'Open web login',
     loginCaptured: 'Login state and cookies saved',
@@ -247,7 +261,7 @@ export default {
     acgripTokenHint: 'Accepts a raw token or a tpx://acg.rip/... link; requests always send the raw token',
     acgripPublishAsTeam: 'Publish as alliance',
     acgripPublishAsTeamHint: 'Publish under the ACG.RIP alliance associated with this account',
-    mikanGroupSearch: 'Search by name, e.g. 三明治摆烂组',
+    mikanGroupSearch: 'Search by subtitle or publishing group name',
     subtitleGroup: 'Subtitle group',
     publishGroup: 'Publish group',
     subtitleGroupId: 'Subtitle group ID',
@@ -281,6 +295,18 @@ export default {
     retrySelected: 'Retry selected ({count})'
   },
   settings: {
+    other: 'Other',
+    dataDir: 'Data location',
+    changeDataDir: 'Change data folder',
+    changeDataDirConfirm: 'Copy current data to: {path}\nChoose an empty folder. The change takes effect immediately; the original data is kept as a backup.',
+    dataDirChanged: 'Data folder changed. The original data has been kept.',
+    dataDirNotEmpty: 'Choose an empty folder. Existing files will not be overwritten.',
+    dataDirRelated: 'The new folder cannot contain, or be inside, the current data folder.',
+    font: 'Font',
+    searchFont: 'Search installed fonts',
+    systemFont: 'System default',
+    fontLoadFailed: 'Unable to load fonts',
+    fontPreview: 'Font preview: 动画发布 · 動畫發佈 · Anime 0123456789',
     subtitleDetect: 'Subtitle Detection',
     proxy: 'Proxy',
     detectIntro:
@@ -317,8 +343,5 @@ export default {
     notTested: 'Not tested',
     openConfigDir: 'Open config folder',
     dataSection: 'Data',
-    configDirHint: 'Stored in Documents/AniBT Publish on Windows',
-    secretsHint:
-      'Site API keys are kept out of config.json — they live in secrets.json, encrypted with AES-256-GCM and portable with the file'
   }
 }

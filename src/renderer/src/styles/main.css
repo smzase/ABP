@@ -204,13 +204,13 @@ body,
 body {
   background-color: var(--background);
   color: var(--foreground);
-  font-family:
+  font-family: var(--app-font-family,
     'Segoe UI',
     'PingFang SC',
     'Microsoft YaHei',
     system-ui,
     -apple-system,
-    sans-serif;
+    sans-serif);
   font-size: 14px;
   overflow: hidden;
   user-select: none;

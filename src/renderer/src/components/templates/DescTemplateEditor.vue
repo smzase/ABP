@@ -38,7 +38,7 @@ async function remove(): Promise<void> {
 }
 
 function setDefault(): void {
-  app.data.defaultDescTemplateId = props.id
+  app.data.defaultDescTemplateId = app.data.defaultDescTemplateId === props.id ? null : props.id
 }
 </script>
 
@@ -49,8 +49,8 @@ function setDefault(): void {
         <UiLabel>{{ t('tpl.templateName') }}</UiLabel>
         <UiInput v-model="name" />
       </div>
-      <UiTooltip :content="app.data.defaultDescTemplateId === id ? t('tpl.defaultTemplate') : t('tpl.setDefault')">
-        <UiButton variant="outline" size="icon" data-probe="set-default-desc-template" @click="setDefault">
+      <UiTooltip :content="app.data.defaultDescTemplateId === id ? t('tpl.clearDefault') : t('tpl.setDefault')">
+        <UiButton variant="outline" size="icon" data-probe="set-default-desc-template" :aria-pressed="app.data.defaultDescTemplateId === id" :aria-label="app.data.defaultDescTemplateId === id ? t('tpl.clearDefault') : t('tpl.setDefault')" @click="setDefault">
           <Star class="h-4 w-4" :class="app.data.defaultDescTemplateId === id && 'fill-primary text-primary'" />
         </UiButton>
       </UiTooltip>

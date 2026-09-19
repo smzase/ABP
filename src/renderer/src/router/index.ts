@@ -4,6 +4,8 @@ export const router = createRouter({
   history: createWebHashHistory(),
   routes: [
     { path: '/', redirect: '/publish' },
+    { path: '/anibt-web-account', name: 'anibt-web-account', meta: { anibtOnly: true }, component: () => import('../views/AnibtWebAccountView.vue') },
+    { path: '/anibt-dashboard', name: 'anibt-dashboard', meta: { anibtOnly: true }, component: () => import('../views/AnibtDashboardView.vue') },
     { path: '/publish', name: 'publish', component: () => import('../views/PublishView.vue') },
     {
       path: '/templates',

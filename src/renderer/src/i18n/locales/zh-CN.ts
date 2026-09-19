@@ -4,7 +4,16 @@ export default {
     templates: '番剧模板',
     accounts: '站点账号',
     records: '发布记录',
-    settings: '设置'
+    settings: '设置',
+    anibtWebAccount: 'AniBT账号',
+    dashboard: '字幕组仪表盘'
+  },
+  webAccount: {
+    hint: '账号独立于发布组，仅用于 AniBT 网页。点击登录后，在下方完成“我是人类”验证，客户端会自动提交登录并确认会话。',
+    waiting: '正在处理；如已显示人机验证，请点击完成验证。',
+    loggedOut: '已退出 AniBT 网页账号',
+    cleared: '已清除 AniBT 网页 Cookie 和缓存',
+    reload: '刷新'
   },
   common: {
     add: '添加',
@@ -97,6 +106,8 @@ export default {
     notesTooLong: '简介超过 {max} 字符上限'
   },
   tpl: {
+    manualName: '手动输入中文名',
+    searchBgmId: '搜索 bgmId',
     titleTemplates: '标题模板',
     descTemplates: '简介模板',
     animeTemplates: '番剧模板',
@@ -143,6 +154,7 @@ export default {
     deleteConfirm: '确认删除该模板？',
     rename: '重命名',
     setDefault: '设为默认',
+    clearDefault: '取消默认',
     defaultTemplate: '默认模板',
     listHint: '右键可重命名、设为默认或删除，拖拽调整顺序',
     useTitleTpl: '套用标题模板',
@@ -182,7 +194,7 @@ export default {
     titleNative: '作品原名（如日文）',
     ep: '集数（默认前补 0，如 1 → 01）',
     epRaw: '原始集数（不补 0）',
-    version: '版本（默认 v1，v1 也会显示）',
+    version: '版本（v1 不显示，v2 及以上显示）',
     versionSuffix: '版本后缀标签（如 [v2]，v1 不显示）',
     resolution: '分辨率（小写 p，如 1080p）',
     resolutionUpper: '分辨率（大写 P，如 1080P）',
@@ -224,6 +236,7 @@ export default {
     disabled: '未启用',
     enabledCount: '已启用 {count} 个站点',
     username: '用户名 / 邮箱',
+    email: '邮箱',
     password: '密码',
     showSecret: '显示密码',
     hideSecret: '隐藏密码',
@@ -231,6 +244,7 @@ export default {
     identityName: '发布身份 / 团队名',
     identityHint: '与站点显示完全一致',
     login: '登录',
+    logout: '退出',
     loggingIn: '登录中',
     openLogin: '打开网页登录',
     loginCaptured: '登录状态与 Cookie 已保存',
@@ -247,7 +261,7 @@ export default {
     acgripTokenHint: '支持裸 Token 或 tpx://acg.rip/... 链接；请求时会自动发送裸 Token',
     acgripPublishAsTeam: '以联盟身份发布',
     acgripPublishAsTeamHint: '发布时勾选 ACG.RIP 的“以当前账号所属联盟身份发布”',
-    mikanGroupSearch: '输入名称查询，例如：三明治摆烂组',
+    mikanGroupSearch: '输入字幕组或发布组名称',
     subtitleGroup: '字幕组',
     publishGroup: '发布组',
     subtitleGroupId: '字幕组 ID',
@@ -281,6 +295,18 @@ export default {
     retrySelected: '重试所选（{count}）'
   },
   settings: {
+    other: '其他',
+    dataDir: '数据存放路径',
+    changeDataDir: '修改数据目录',
+    changeDataDirConfirm: '将当前数据复制到：{path}\n请选择空文件夹。切换后立即生效，旧目录中的数据会保留作为备份。',
+    dataDirChanged: '已切换数据目录，旧目录的数据已保留。',
+    dataDirNotEmpty: '请选择空文件夹，现有文件不会被覆盖。',
+    dataDirRelated: '新目录不能位于当前数据目录内部，也不能包含当前数据目录。',
+    font: '字体',
+    searchFont: '搜索本机字体',
+    systemFont: '系统默认',
+    fontLoadFailed: '读取字体列表失败',
+    fontPreview: '字体预览：动画发布 · 動畫發佈 · Anime 0123456789',
     subtitleDetect: '字幕识别',
     proxy: '代理',
     detectIntro: '识别种子文件名中的「词」，映射为字幕语言与字幕类型。预设词可自由修改删除，长词优先匹配。',
@@ -316,7 +342,5 @@ export default {
     notTested: '未检测',
     openConfigDir: '打开配置目录',
     dataSection: '数据',
-    configDirHint: 'Windows 存放于 Documents/AniBT Publish',
-    secretsHint: '站点 API Key 不写在 config.json 里，单独存为 secrets.json（AES-256-GCM 加密，随文件走）'
   }
 }

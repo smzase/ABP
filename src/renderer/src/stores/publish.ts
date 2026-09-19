@@ -111,7 +111,7 @@ export const usePublishStore = defineStore('publish', () => {
       format: p.format ?? 'MKV',
       subtitleType,
       languages,
-      customTags: [],
+      customTags: [...(matchedTemplate?.customTags ?? [])],
       description: '',
       codec: p.codec ?? '',
       bitDepth: p.bitDepth ?? '',
@@ -268,6 +268,7 @@ export const usePublishStore = defineStore('publish', () => {
     const tpl = templateOf(entry)
     if (!tpl) return
     entry.nyaa = tpl.nyaaProxy
+    entry.customTags = [...tpl.customTags]
     applyProfileToEntry(entry, tpl)
     entry.title = renderEntryTitle(entry)
     if (!entry.description) entry.description = tpl.descriptionMd

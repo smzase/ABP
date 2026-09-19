@@ -101,7 +101,7 @@ function enabledCount(group: GroupAccount): number {
     </div>
 
     <UiDialog v-model:open="addOpen" :title="t('accounts.addGroup')">
-      <div class="flex flex-col gap-1.5"><UiLabel>{{ t('accounts.groupName') }}</UiLabel><UiInput v-model="newGroupName" placeholder="三明治摆烂组" @keydown.enter="addGroup" /></div>
+      <div class="flex flex-col gap-1.5"><UiLabel>{{ t('accounts.groupName') }}</UiLabel><UiInput v-model="newGroupName" data-probe="new-group-name" :placeholder="t('accounts.groupName')" @keydown.enter="addGroup" /></div>
       <div class="flex justify-end gap-2"><UiButton variant="outline" @click="addOpen = false">{{ t('common.cancel') }}</UiButton><UiButton :disabled="!newGroupName.trim()" @click="addGroup">{{ t('common.add') }}</UiButton></div>
     </UiDialog>
 
@@ -114,7 +114,7 @@ function enabledCount(group: GroupAccount): number {
       <div v-if="editingGroup" class="grid min-h-[480px] grid-cols-[180px_minmax(0,1fr)] gap-4">
         <nav class="flex flex-col gap-1 border-r pr-3">
           <button v-for="site in PUBLISH_SITES" :key="site" :data-account-site="site" class="flex cursor-pointer items-center justify-between rounded-md px-3 py-2 text-left text-sm" :class="cn(activeSite === site ? 'bg-primary/10 font-medium text-primary' : 'hover:bg-accent')" @click="activeSite = site">
-            <span>{{ SITE_LABELS[site] }}</span><span class="h-2 w-2 rounded-full" :class="editingGroup.sites[site].enabled ? 'bg-green-500' : 'bg-muted-foreground/30'" />
+            <span>{{ SITE_LABELS[site] }}</span><span class="h-2 w-2 rounded-full" :class="siteEnabled(editingGroup, site) ? 'bg-green-500' : 'bg-muted-foreground/30'" />
           </button>
         </nav>
         <div class="min-w-0 overflow-y-auto pr-1"><SiteAccountEditor :group-id="editingGroup.id" :site="activeSite" /></div>

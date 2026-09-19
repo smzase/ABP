@@ -137,7 +137,7 @@ function onAdd(): void {
           @select="(id: string) => (selectedTitleId = id)"
           @rename="(id: string, name: string) => renameIn(app.data.titleTemplates, id, name)"
           @remove="(id: string) => removeTitle(id)"
-          @set-default="(id: string) => (app.data.defaultTitleTemplateId = id)"
+          @set-default="(id: string) => (app.data.defaultTitleTemplateId = app.data.defaultTitleTemplateId === id ? null : id)"
           @reorder="(from: number, to: number) => reorder(app.data.titleTemplates, from, to)"
         />
         <div class="min-w-0 flex-1 overflow-y-auto">
@@ -156,7 +156,7 @@ function onAdd(): void {
           @select="(id: string) => (selectedDescId = id)"
           @rename="(id: string, name: string) => renameIn(app.data.descTemplates, id, name)"
           @remove="(id: string) => removeDesc(id)"
-          @set-default="(id: string) => (app.data.defaultDescTemplateId = id)"
+          @set-default="(id: string) => (app.data.defaultDescTemplateId = app.data.defaultDescTemplateId === id ? null : id)"
           @reorder="(from: number, to: number) => reorder(app.data.descTemplates, from, to)"
         />
         <div class="min-w-0 flex-1 overflow-y-auto">

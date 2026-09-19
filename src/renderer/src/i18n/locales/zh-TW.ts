@@ -4,7 +4,16 @@ export default {
     templates: '番劇模板',
     accounts: '站點帳號',
     records: '發佈記錄',
-    settings: '設定'
+    settings: '設定',
+    anibtWebAccount: 'AniBT帳號',
+    dashboard: '字幕組儀表盤'
+  },
+  webAccount: {
+    hint: '帳號獨立於發布組，僅用於 AniBT 網頁。點擊登入後，在下方完成「我是人類」驗證，用戶端會自動提交登入並確認工作階段。',
+    waiting: '正在處理；如已顯示人機驗證，請點擊完成驗證。',
+    loggedOut: '已登出 AniBT 網頁帳號',
+    cleared: '已清除 AniBT 網頁 Cookie 和快取',
+    reload: '刷新'
   },
   common: {
     add: '新增',
@@ -97,6 +106,8 @@ export default {
     notesTooLong: '簡介超過 {max} 字元上限'
   },
   tpl: {
+    manualName: '手動輸入中文名',
+    searchBgmId: '搜尋 bgmId',
     titleTemplates: '標題模板',
     descTemplates: '簡介模板',
     animeTemplates: '番劇模板',
@@ -143,6 +154,7 @@ export default {
     deleteConfirm: '確認刪除該模板？',
     rename: '重新命名',
     setDefault: '設為預設',
+    clearDefault: '取消預設',
     defaultTemplate: '預設模板',
     listHint: '右鍵可重新命名、設為預設或刪除，拖曳調整順序',
     useTitleTpl: '套用標題模板',
@@ -182,7 +194,7 @@ export default {
     titleNative: '作品原名（如日文）',
     ep: '集數（預設前補 0，如 1 → 01）',
     epRaw: '原始集數（不補 0）',
-    version: '版本（預設 v1，v1 也會顯示）',
+    version: '版本（v1 不顯示，v2 及以上顯示）',
     versionSuffix: '版本後綴標籤（如 [v2]，v1 不顯示）',
     resolution: '解析度（小寫 p，如 1080p）',
     resolutionUpper: '解析度（大寫 P，如 1080P）',
@@ -224,6 +236,7 @@ export default {
     disabled: '未啟用',
     enabledCount: '已啟用 {count} 個站點',
     username: '使用者名稱 / 郵箱',
+    email: '郵箱',
     password: '密碼',
     showSecret: '顯示密碼',
     hideSecret: '隱藏密碼',
@@ -231,6 +244,7 @@ export default {
     identityName: '發佈身份 / 團隊名',
     identityHint: '與站點顯示完全一致',
     login: '登入',
+    logout: '登出',
     loggingIn: '登入中',
     openLogin: '開啟網頁登入',
     loginCaptured: '登入狀態與 Cookie 已儲存',
@@ -247,7 +261,7 @@ export default {
     acgripTokenHint: '支援裸 Token 或 tpx://acg.rip/... 連結；請求時會自動傳送裸 Token',
     acgripPublishAsTeam: '以聯盟身份發佈',
     acgripPublishAsTeamHint: '發佈時勾選 ACG.RIP 的「以目前帳號所屬聯盟身份發佈」',
-    mikanGroupSearch: '輸入名稱查詢，例如：三明治擺爛組',
+    mikanGroupSearch: '輸入字幕組或發佈組名稱',
     subtitleGroup: '字幕組',
     publishGroup: '發佈組',
     subtitleGroupId: '字幕組 ID',
@@ -281,6 +295,18 @@ export default {
     retrySelected: '重試所選（{count}）'
   },
   settings: {
+    other: '其他',
+    dataDir: '資料存放路徑',
+    changeDataDir: '修改資料目錄',
+    changeDataDirConfirm: '將目前資料複製到：{path}\n請選擇空資料夾。切換後立即生效，舊目錄的資料將保留作為備份。',
+    dataDirChanged: '已切換資料目錄，舊目錄的資料已保留。',
+    dataDirNotEmpty: '請選擇空資料夾，現有檔案不會被覆寫。',
+    dataDirRelated: '新目錄不能位於目前資料目錄內，也不能包含目前資料目錄。',
+    font: '字型',
+    searchFont: '搜尋本機字型',
+    systemFont: '系統預設',
+    fontLoadFailed: '讀取字型清單失敗',
+    fontPreview: '字型預覽：动画发布 · 動畫發佈 · Anime 0123456789',
     subtitleDetect: '字幕識別',
     proxy: '代理',
     detectIntro: '識別種子檔名中的「詞」，映射為字幕語言與字幕類型。預設詞可自由修改刪除，長詞優先匹配。',
@@ -316,7 +342,5 @@ export default {
     notTested: '未檢測',
     openConfigDir: '開啟設定目錄',
     dataSection: '資料',
-    configDirHint: 'Windows 存放於 Documents/AniBT Publish',
-    secretsHint: '站點 API Key 不寫在 config.json 裡，單獨存為 secrets.json（AES-256-GCM 加密，隨檔案走）'
   }
 }

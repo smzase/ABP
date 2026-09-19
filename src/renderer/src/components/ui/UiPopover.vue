@@ -1,17 +1,32 @@
 <script setup lang="ts">
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { PopoverRoot, PopoverTrigger, PopoverPortal, PopoverContent } from 'reka-ui'
 import { cn } from '@renderer/lib/utils.ts'
+import { dashboardActive, openDashboardMenu, closeDashboardMenu } from '@renderer/lib/dashboard-overlay.ts'
 
-defineProps<{ class?: string; side?: 'top' | 'bottom' | 'left' | 'right'; align?: 'start' | 'center' | 'end' }>()
+const props = defineProps<{ class?: string; side?: 'top' | 'bottom' | 'left' | 'right'; align?: 'start' | 'center' | 'end'; dashboardMenu?: 'appearance' | 'language' }>()
 const open = defineModel<boolean>('open', { default: false })
+const native = computed(() => dashboardActive.value && !!props.dashboardMenu)
+const trigger = ref<{ $el: HTMLElement }>()
+let nativeId = ''
+watch(() => open.value && native.value, active => {
+  if (active && trigger.value && props.dashboardMenu) {
+    nativeId = crypto.randomUUID()
+    openDashboardMenu(nativeId, props.dashboardMenu, trigger.value.$el, props.side ?? 'bottom', () => { open.value = false })
+  } else if (nativeId) {
+    closeDashboardMenu(nativeId)
+    nativeId = ''
+  }
+})
+onBeforeUnmount(() => { if (nativeId) closeDashboardMenu(nativeId) })
 </script>
 
 <template>
   <PopoverRoot v-model:open="open">
-    <PopoverTrigger as-child>
+    <PopoverTrigger ref="trigger" as-child>
       <slot name="trigger" />
     </PopoverTrigger>
-    <PopoverPortal>
+    <PopoverPortal v-if="!native">
       <PopoverContent
         :side="side ?? 'bottom'"
         :align="align ?? 'start'"

@@ -16,17 +16,16 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const { app, BrowserWindow, session } = require('electron')
+const webProbe = require('./anibt-web-probe.cjs')
+const preferencesProbe = require('./preferences-probe.cjs')
 
 // ---- 配置目录隔离：必须在 require 主进程之前改，否则 store.load() 已经读过真实目录了
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'abp-ui-probe-'))
 app.setPath('documents', sandbox)
 app.setPath('userData', sandbox)
-app.once('ready', () => {
-  session.defaultSession.webRequest.onBeforeRequest(
-    { urls: ['http://*/*', 'https://*/*'] },
-    (_details, callback) => callback({ cancel: true })
-  )
-})
+// Block every partition, not just defaultSession. AniBT web traffic is served by local fixtures.
+app.on('session-created', ses => webProbe.isolateSession(ses))
+app.once('ready', () => webProbe.isolateSession(session.defaultSession))
 
 require(path.join(__dirname, '..', 'out', 'main', 'index.js'))
 
@@ -34,6 +33,7 @@ const errors = []
 const results = []
 function check(name, pass, detail) {
   results.push({ name, pass: !!pass, detail })
+  if (!pass) console.error(`  FAIL: ${name}${detail ? ` — ${detail}` : ''}`)
 }
 
 const js = (win, code) => win.webContents.executeJavaScript(code)
@@ -216,6 +216,25 @@ async function clickElementAt(win, expr) {
   return true
 }
 
+async function selectTemplateContext(win, label) {
+  win.focus()
+  win.webContents.focus()
+  const point = await js(win, `(()=>{const el=document.querySelector('main [draggable=true]');const r=el.getBoundingClientRect();
+    return {x:Math.round(r.left+10),y:Math.round(r.top+10)}})()`)
+  win.webContents.sendInputEvent({ type: 'mouseMove', ...point })
+  win.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'right', clickCount: 1 })
+  win.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'right', clickCount: 1 })
+  const item = `[...document.querySelectorAll('[role=menuitem]')].find(e=>e.textContent.trim()===${JSON.stringify(label)})`
+  if (!(await waitFor(win, item))) {
+    console.error('模板右键菜单未找到:', label, await js(win, "[...document.querySelectorAll('[role=menuitem]')].map(e=>e.textContent.trim())"))
+    return false
+  }
+  const clicked = await clickElementAt(win, item)
+  // md-editor keeps hidden heading menuitems mounted. Only wait for reka's
+  // context menu to close, otherwise a successful selection looks like a timeout.
+  return clicked && await waitFor(win, "!document.querySelector('[data-reka-collection-item][role=menuitem]')")
+}
+
 /**
  * 出站 payload 必须先过 toPlain。
  * Vue 的响应式对象是 Proxy，结构化克隆（contextBridge / ipcRenderer）不认它，
@@ -251,6 +270,12 @@ function bundleUsesNativeConfirm() {
 }
 
 async function run(win) {
+  const preferencesContext = { win, js, check, waitFor, clickElementAt, clickByText, typeText, nav, sandbox, pressKey, openSelectBySelector }
+  if (process.env.ABP_PROBE_SCOPE === 'preferences') return preferencesProbe.run(preferencesContext)
+  if (process.env.ABP_PROBE_SCOPE === 'anibt-web') {
+    await waitFor(win, "document.querySelector('[data-probe=anibt-web-account]')")
+    return webProbe.run({ win, js, check, waitFor, clickElementAt, clickByText, typeText, nav, sandbox })
+  }
   // Inspect parsed modules: file:// resources do not appear in PerformanceResourceTiming.
   const scripts = new Set()
   const onScript = (_event, method, params) => {
@@ -283,9 +308,11 @@ async function run(win) {
   check('标题栏和发布模式切换已增高', titleBarSize?.bar === 44 && titleBarSize?.control === 32, JSON.stringify(titleBarSize))
   check('切换到本地直发', await clickElementAt(win, `document.querySelector('[data-publish-mode=local]')`))
   check('本地模式已选中', await waitFor(win, `document.querySelector('[data-publish-mode=local]')?.className.includes('bg-card')`))
+  check('本地模式不显示字幕组仪表盘', (await js(win, `!!document.querySelector('[data-probe=anibt-dashboard]')`)) === false)
   check('本地模式已写入配置', await waitFor(win, `window.api.loadStore().then(data=>data.settings.publishMode==='local')`))
   check('切回 AniBT 主发布', await clickElementAt(win, `document.querySelector('[data-publish-mode=anibt]')`))
   check('AniBT 模式恢复并写入配置', await waitFor(win, `window.api.loadStore().then(data=>data.settings.publishMode==='anibt')`))
+  check('AniBT 模式显示字幕组仪表盘', (await js(win, `!!document.querySelector('[data-probe=anibt-dashboard]')`)) === true)
 
   // ---------- 侧边栏：展开时不再浮出重复的导航气泡 ----------
   // 展开态按钮上已经写着「发布 / 番剧模板 / …」，再浮一层同样的字是纯噪音。
@@ -298,7 +325,7 @@ async function run(win) {
       return {w:Math.round(a.getBoundingClientRect().width), n:btns.length,
         labeled:btns.filter(b=>b.textContent.trim().length>0).length}})()`
   )
-  check('侧边栏展开且导航项带文字', sideBar && sideBar.n === 5 && sideBar.labeled === 5, JSON.stringify(sideBar))
+  check('侧边栏展开且导航项带文字', sideBar && sideBar.n === 7 && sideBar.labeled === 7, JSON.stringify(sideBar))
   check('展开时侧边栏更窄（w-40 = 160px）', sideBar && sideBar.w === 160, sideBar && `width=${sideBar.w}`)
   check('悬停展开态导航项：不弹气泡', (await hoverSelector(win, 'aside nav button')) && (await js(win, `document.querySelectorAll('[role=tooltip]').length`)) === 0)
   // 收起后必须还弹 —— 那时按钮只剩图标，气泡是唯一的说明
@@ -319,6 +346,7 @@ async function run(win) {
   await wait(700)
 
   // ---------- 发布页：投放区居中且整块可点 ----------
+  await webProbe.run({ win, js, check, waitFor, clickElementAt, clickByText, typeText, nav, sandbox })
   await nav(win, 0)
   await wait(700)
   const drop = await js(
@@ -424,14 +452,16 @@ async function run(win) {
   await wait(900)
   check('聚焦手动 bgmId 输入框', (await focusByPlaceholder(win, '手动输入')) !== null)
   await typeText(win, '400602')
-  check('提交新建', await clickByText(win, '添加', { exact: true, last: true, root: 'body' }))
+  check('提交新建', await clickElementAt(win, "document.querySelector('[data-probe=add-anime-by-id]')"))
   await wait(1400)
 
-  const bgmField = await focusByPlaceholder(win, '400602', { caretStart: true })
+  check('两个番剧 ID 输入框不再显示示例数字', await js(win,
+    "['anime-bgm-id','anime-mikan-bangumi-id'].every(id=>document.querySelector(`[data-probe=${id}]`)?.placeholder==='')"))
+  const bgmField = await js(win, "(()=>{const e=document.querySelector('[data-probe=anime-bgm-id]');if(!e)return null;e.focus();e.setSelectionRange(0,0);return e.value})()")
   check('番剧模板已创建，bgmId 回填', bgmField === '400602', `value=${bgmField}`)
   // 在开头插入一个非法字符：以前会把整格清空
   await typeText(win, 'x')
-  const afterJunk = await valueByPlaceholder(win, '400602')
+  const afterJunk = await js(win, "document.querySelector('[data-probe=anime-bgm-id]')?.value")
   check('bgmId 输入非法字符不会清空整格', afterJunk === 'x400602', `value=${afterJunk}`)
 
   check(
@@ -626,14 +656,34 @@ async function run(win) {
   check('切到标题模板设置默认项', await clickByText(win, '标题模板', { exact: true }))
   check('将当前标题模板设为默认', await clickElementAt(win,
     `document.querySelector('[data-probe=set-default-title-template]')`))
+  check('再次点击标题模板默认按钮可以取消默认', await clickElementAt(win,
+    `document.querySelector('[data-probe=set-default-title-template]')`))
+  check('标题模板默认已取消', await waitFor(win,
+    `window.api.loadStore().then(data=>data.defaultTitleTemplateId===null)`))
+  check('标题模板右键可以设为默认', await selectTemplateContext(win, '设为默认') && await waitFor(win,
+    "document.querySelector('[data-probe=set-default-title-template]')?.getAttribute('aria-pressed')==='true'"))
+  check('标题模板右键可以取消默认', await selectTemplateContext(win, '取消默认') && await waitFor(win,
+    "document.querySelector('[data-probe=set-default-title-template]')?.getAttribute('aria-pressed')==='false'"))
+  check('重新设置标题模板默认供新建测试使用', await clickElementAt(win,
+    `document.querySelector('[data-probe=set-default-title-template]')`))
   check('切到简介模板设置默认项', await clickByText(win, '简介模板', { exact: true }))
   check('将当前简介模板设为默认', await clickElementAt(win,
+    `document.querySelector('[data-probe=set-default-desc-template]')`))
+  check('再次点击简介模板默认按钮可以取消默认', await clickElementAt(win,
+    `document.querySelector('[data-probe=set-default-desc-template]')`))
+  check('简介模板默认已取消', await waitFor(win,
+    `window.api.loadStore().then(data=>data.defaultDescTemplateId===null)`))
+  check('简介模板右键可以设为默认', await selectTemplateContext(win, '设为默认') && await waitFor(win,
+    "document.querySelector('[data-probe=set-default-desc-template]')?.getAttribute('aria-pressed')==='true'"))
+  check('简介模板右键可以取消默认', await selectTemplateContext(win, '取消默认') && await waitFor(win,
+    "document.querySelector('[data-probe=set-default-desc-template]')?.getAttribute('aria-pressed')==='false'"))
+  check('重新设置简介模板默认供新建测试使用', await clickElementAt(win,
     `document.querySelector('[data-probe=set-default-desc-template]')`))
   check('切回番剧模板', await clickByText(win, '番剧模板', { exact: true }))
   check('再次打开“添加番剧模板”', await clickByText(win, '添加番剧模板'))
   check('聚焦第二个模板的手动 bgmId', (await focusByPlaceholder(win, '手动输入')) !== null)
   await typeText(win, '444634')
-  check('提交第二个番剧模板', await clickByText(win, '添加', { exact: true, last: true, root: 'body' }))
+  check('提交第二个番剧模板', await clickElementAt(win, "document.querySelector('[data-probe=add-anime-by-id]')"))
   check('选中第二个番剧模板', await waitFor(win,
     `[...document.querySelectorAll('main [draggable=true]')].some(x=>x.textContent.includes('bgm:444634'))`) &&
     await clickElementAt(win, `[...document.querySelectorAll('main [draggable=true]')].find(x=>x.textContent.includes('bgm:444634'))`))
@@ -790,11 +840,11 @@ async function run(win) {
   check('取消确认弹窗', await clickByText(win, '取消', { root: 'body', last: true }))
   check('弹窗已关闭', await waitFor(win, `!document.querySelector('[role=alertdialog]')`))
   // 关键：弹窗关掉之后输入框必须还能接受键入
-  const afterDlg = await focusByPlaceholder(win, '400602', { select: true })
+  const afterDlg = await js(win, "(()=>{const e=document.querySelector('[data-probe=anime-bgm-id]');if(!e)return null;e.focus();e.select();return e.value})()")
   check('确认弹窗关闭后输入框仍可聚焦', afterDlg !== null)
   if (afterDlg !== null) {
     await typeText(win, '12345')
-    const typedAfter = await valueByPlaceholder(win, '400602')
+    const typedAfter = await js(win, "document.querySelector('[data-probe=anime-bgm-id]')?.value")
     check('确认弹窗关闭后仍能打字（曾被 window.confirm 锁死）', typedAfter === '12345', `value=${typedAfter}`)
   }
 
@@ -847,7 +897,7 @@ async function run(win) {
   await wait(600)
   check('打开「创建组」', await clickByText(win, '创建组'))
   await wait(900)
-  check('聚焦组名输入框', (await focusByPlaceholder(win, '三明治摆烂组')) !== null)
+  check('聚焦组名输入框', (await focusByPlaceholder(win, '组名称')) !== null)
   await typeText(win, 'probegroup')
   check('提交建组', await clickByText(win, '添加', { exact: true, last: true, root: 'body' }))
   await wait(900)
@@ -869,6 +919,26 @@ async function run(win) {
     return nav&&sw?{sites:nav.querySelectorAll('[data-account-site]').length,disabled:sw.disabled,state:sw.getAttribute('data-state')}:null})()`)
   check('账号详情列出八个站点', accountShell && accountShell.sites === 8, JSON.stringify(accountShell))
   check('AniBT 模式下 AniBT 强制启用', accountShell && accountShell.disabled && accountShell.state === 'checked', JSON.stringify(accountShell))
+  await clickByText(win, '关闭', { exact: true, root: '[role=dialog]' })
+  await waitFor(win, "!document.querySelector('[role=dialog]')")
+  check('切换到本地模式', await clickElementAt(win, `document.querySelector('[data-publish-mode=local]')`))
+  await clickElementAt(win, "[...document.querySelectorAll('main .cursor-pointer')].find(e=>e.textContent.includes('probegroup'))")
+  check('新建组在本地模式下 AniBT 默认关闭', await waitFor(win,
+    "(()=>{const sw=document.querySelector('[data-probe=site-enabled-switch]');return sw&&!sw.disabled&&sw.getAttribute('data-state')==='unchecked'})()"))
+  await clickElementAt(win, "document.querySelector('[data-probe=site-enabled-switch]')")
+  check('本地 AniBT 可以手动启用并保存', await waitFor(win,
+    "window.api.loadStore().then(d=>d.groups.find(g=>g.name==='probegroup')?.sites.anibt.enabled===true)"))
+  await clickElementAt(win, "document.querySelector('[data-probe=site-enabled-switch]')")
+  check('本地 AniBT 关闭状态能保存', await waitFor(win,
+    "window.api.loadStore().then(d=>d.groups.find(g=>g.name==='probegroup')?.sites.anibt.enabled===false)"))
+  await clickByText(win, '关闭', { exact: true, root: '[role=dialog]' })
+  await waitFor(win, "!document.querySelector('[role=dialog]')")
+  check('切回 AniBT 模式', await clickElementAt(win, `document.querySelector('[data-publish-mode=anibt]')`))
+  await clickElementAt(win, "[...document.querySelectorAll('main .cursor-pointer')].find(e=>e.textContent.includes('probegroup'))")
+  check('本地关闭不影响 AniBT 模式强制启用', await waitFor(win,
+    "(()=>{const sw=document.querySelector('[data-probe=site-enabled-switch]');return sw?.disabled&&sw.getAttribute('data-state')==='checked'})()"))
+  check('站点账号内不再显示 AniBT 网页登录', await js(win,
+    `!document.querySelector('[data-probe=anibt-web-login]') && !document.querySelector('[data-probe=site-account-editor] input[type=email]')`))
   check('账号弹窗右下角关闭按钮使用关闭图标', await js(win,
     "[...document.querySelectorAll('[role=dialog] button')].some(b=>b.textContent.trim()==='关闭'&&b.querySelector('svg.lucide-x'))"))
   check('切换到蜜柑账号配置', await clickElementAt(win, `document.querySelector('[data-account-site=mikan]')`))
@@ -959,10 +1029,20 @@ async function run(win) {
   await wait(900)
   check('填 bgmId', (await focusByPlaceholder(win, '手动输入')) !== null)
   await typeText(win, '400602')
-  check('提交新建', await clickByText(win, '添加', { exact: true, last: true, root: 'body' }))
+  check('提交新建', await clickElementAt(win, "document.querySelector('[data-probe=add-anime-by-id]')"))
   await wait(1400)
   check('选中刚新建的发布流程模板', await clickElementAt(win,
     `[...document.querySelectorAll('main [draggable=true]')].find(x=>x.textContent.includes('bgm:400602'))`))
+  await js(win, "(()=>{const e=document.querySelector('[data-probe=anime-custom-tags] input');e.focus()})()")
+  await typeText(win, 'ABP-TAG')
+  await pressKey(win, 'Enter')
+  check('发布流程模板已保存自定义标签', await waitFor(win,
+    "window.api.loadStore().then(d=>d.animeTemplates.some(x=>x.bgmId===400602&&x.customTags.includes('ABP-TAG')))"))
+  // The fixture has CHS+CHT+JP, so publishing uses the both-language variant.
+  await clickByText(win, '简繁', { exact: true })
+  await js(win, "(()=>{const e=document.querySelector('[data-probe=anime-title-template]');e.focus();e.setSelectionRange(e.value.length,e.value.length)})()")
+  await typeText(win, ' {{customTags}}')
+  await js(win, "[...document.querySelectorAll('main button[role=combobox]')].find(x=>x.textContent.includes('必须选择发布组'))?.scrollIntoView({block:'center'})")
   // 选发布组（前面建的 probegroup），否则发布会在「发布组未配置 API Key」就短路
   check('打开发布组下拉', await openSelectByText(win, '必须选择发布组'))
   await wait(700)
@@ -1020,6 +1100,7 @@ async function run(win) {
     `document.querySelector('[data-probe=final-title-input]')?.value`)
   check('显式设置默认后，新建番剧模板会生成标题', generatedTitle?.includes('[字幕组组名]') || generatedTitle?.includes('1080P'),
     `value=${generatedTitle}`)
+  check('番剧模板标签随选择带入发布标题', generatedTitle?.includes('ABP-TAG'), `value=${generatedTitle}`)
   // 模板生成的标题要随最终发布字段即时重渲染。
   await js(win, `(()=>{const i=document.querySelector('[data-probe=final-episode-input]');i.focus();i.select()})()`)
   await typeText(win, '09')
@@ -1118,6 +1199,8 @@ async function run(win) {
     await waitFor(win, `(${previewSwitch})?.getAttribute('data-state')==='checked'`),
     `state=${await js(win, `(()=>{const b=${previewSwitch}; return b?b.getAttribute('data-state'):null})()`)}`
   )
+
+  await preferencesProbe.run(preferencesContext)
 
   // ---------- 发布链路的克隆安全 ----------
   // entry.languages 是 store 里的响应式数组（Proxy），以前直接送进 IPC 会抛

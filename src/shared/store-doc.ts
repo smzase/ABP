@@ -25,7 +25,7 @@ import { defaultSiteAccount, defaultSiteAccounts } from './sites.ts'
 export function defaultSettings(): Settings {
   return {
     // 默认浅色（#fafafa）—— 深色是可选项，不是默认
-    appearance: { mode: 'light', accent: DEFAULT_ACCENT },
+    appearance: { mode: 'light', accent: DEFAULT_ACCENT, fontFamily: '' },
     locale: 'zh-CN',
     proxy: { mode: 'system', type: 'HTTP', host: '127.0.0.1', port: 7890, username: '', password: '' },
     subtitleDetect: {
@@ -40,6 +40,7 @@ export function defaultSettings(): Settings {
 export function defaultAppData(): AppData {
   return {
     version: 1,
+    anibtWebAccount: { username: '', password: '', cookies: [], userAgent: '' },
     settings: defaultSettings(),
     groups: [],
     titleTemplates: [
@@ -76,7 +77,7 @@ function strArr(v: unknown): string[] {
 
 function cleanCookies(v: unknown): StoredSiteCookie[] {
   if (!Array.isArray(v)) return []
-  return v.filter(isObj).map((x) => ({
+  return v.filter(isObj).filter(x => typeof x.name === 'string' && !!x.name && typeof x.domain === 'string' && !!x.domain && typeof x.value === 'string').map((x) => ({
     name: str(x.name),
     value: str(x.value),
     domain: str(x.domain),
@@ -95,7 +96,7 @@ function cleanSiteAccount(site: PublishSite, v: unknown): SiteAccountConfig {
   const base = defaultSiteAccount(site)
   const x = isObj(v) ? v : {}
   return {
-    enabled: x.enabled === true || (site === 'anibt' && x.enabled !== false),
+    enabled: x.enabled === true,
     apiKey: str(x.apiKey),
     apiUrl: str(x.apiUrl, base.apiUrl),
     apiToken: str(x.apiToken),
@@ -147,6 +148,11 @@ export function sanitizeAppData(raw: unknown): AppData {
   if (!isObj(raw)) return base
 
   const r = raw as Record<string, unknown>
+  const web = isObj(r.anibtWebAccount) ? r.anibtWebAccount : {}
+  base.anibtWebAccount = {
+    username: str(web.username), password: str(web.password),
+    cookies: cleanCookies(web.cookies), userAgent: str(web.userAgent)
+  }
   const s = isObj(r.settings) ? r.settings : {}
   const appearance = isObj(s.appearance) ? s.appearance : {}
   const proxy = isObj(s.proxy) ? s.proxy : {}
@@ -155,6 +161,7 @@ export function sanitizeAppData(raw: unknown): AppData {
   base.settings = {
     appearance: {
       mode: appearance.mode === 'dark' ? 'dark' : 'light',
+      fontFamily: str(appearance.fontFamily).trim().slice(0, 200),
       accent: str(appearance.accent, base.settings.appearance.accent)
     },
     locale: s.locale === 'zh-TW' || s.locale === 'en' ? s.locale : 'zh-CN',
@@ -254,6 +261,7 @@ export function sanitizeAppData(raw: unknown): AppData {
           native: str(names.native)
         },
         groupId: str(a.groupId),
+        customTags: [...new Set(strArr(a.customTags).map(tag => tag.trim()).filter(Boolean))],
         nyaaProxy: a.nyaaProxy === true,
         nyaaInformation: str(a.nyaaInformation),
         nyaaHidden: a.nyaaHidden === true,

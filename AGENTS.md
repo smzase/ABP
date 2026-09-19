@@ -40,7 +40,11 @@ scripts/      # run-checks.mjs (pure-logic unit tests), ui-probe.cjs (live-windo
    (2) add the handler in `main/ipc.ts`, (3) expose one more method in `preload/index.ts`.
 2. **Config directory**: Windows = `Documents/AniBT Publish/` (same for the portable
    single-exe build); macOS = `~/Library/Application Support/AniBT Publish/`;
-   Linux = `$XDG_CONFIG_HOME/anibt-publish`. See `main/paths.ts` — do not move it.
+   Linux = `$XDG_CONFIG_HOME/anibt-publish`. These remain the defaults. Settings → Other
+   can move application data to an empty directory; `data-location.json` at the original
+   default path records the choice. `main/data-directory.ts` copies/verifies config,
+   encrypted secrets and pending torrents before switching, retaining the old files.
+   Never overwrite a nonempty destination or nest it under/over the current data directory.
 3. **Artifact purity**: keep `dependencies` in package.json empty — everything goes in
    devDependencies and gets bundled into `out/`; the asar must contain no node_modules.
    After touching packaging config, verify with
@@ -114,6 +118,8 @@ scripts/      # run-checks.mjs (pure-logic unit tests), ui-probe.cjs (live-windo
     theming, no animation. `UiSelect` wraps reka-ui so the listbox is in-app DOM. Note
     reka-ui reserves the empty string for "clear selection", so a placeholder is the
     `placeholder` prop, not an `<option value="">`.
+    The searchable font picker uses reka-ui Combobox + ComboboxVirtualizer in
+    `FontSelect.vue`: search stays inside the popup, with only visible rows mounted.
 17. **md-editor-v3 previews on a 500 ms debounce** (`renderDelay` in its config), which
     reads as "the preview lags half a second behind my typing". `lib/markdown.ts` sets it
     to `0`.
@@ -187,6 +193,19 @@ users see in published titles.
   makes `{{titleZhHans}}` render traditional text in the trad variant.
 - Template variable names are matched **case-insensitively** (`{{titlezhhans}}` works).
   Unknown names are still left verbatim so typos are visible in the preview.
+  `{{version}}` and `{{versionSuffix}}` both omit the default v1; v2+ render as v2 / [v2].
+  Variable pickers list `titleZh` before `titleZhHans` and `titleZhHant`.
+- Anime templates can be created from a Chinese name without IDs; required ID validation
+  still runs at publishing time. The editor's Bangumi search only fills bgmId, preserving
+  manually entered names. Template `customTags` use the same reorderable UiTagInput as
+  publishing; copy the ordered array when matching/selecting a template, never share it.
+- Settings → Other contains Data and Font. Font families are enumerated on demand using
+  Chromium Local Font Access; do not load fonts at startup or bundle font files. Store the
+  selected family in `appearance.fontFamily`, apply it through `--app-font-family`, and
+  synchronize it to the separate dashboard menu renderer. Empty means system default.
+  Never mount all font options or apply every installed font to its own option: this
+  freezes opening large lists. Keep fixed-height virtual rows in the current app font;
+  the preview follows the selected family. Test with the offline 10,000-font fixture.
 - **Anime templates start blank.** New ones get empty title templates and an empty
   description rather than a copy of the first global template, and `sanitizeAppData`
   must not backfill them either — otherwise a field the user cleared grows back on the
@@ -194,12 +213,17 @@ users see in published titles.
   marked as default: new anime templates copy that content at creation time. Users can
   still attach another global template via the picker in `AnimeTemplateEditor`, which
   reports "自定义" once the text no longer matches any global template.
+  The star button and context menu toggle the default off when it is already selected;
+  clearing the default never changes content already copied to anime templates.
 
 ## Local direct publishing
 
 - The title bar has two modes: `anibt` is the primary/default path and uses AniBT's
   publish API; `local` is the fallback that uploads from the Electron main process.
   Records are mode-scoped and the records page must not mix the two.
+  New groups start with every local site disabled, including AniBT. AniBT mode forces
+  its site on only in the effective UI/publishing behavior; never overwrite the local
+  enabled preference. Preserve explicit saved switches and legacy group migration.
 - Local mode supports exactly eight sites: AniBT, Mikan, Nyaa, DMHY, AcgnX Asia
   (末日动漫), AcgnX Global, Bangumi.moe (萌番组), and ACG.RIP. Authentication is:
   AniBT API Key; Mikan MikanHash API Token; Nyaa username/password through its
@@ -217,6 +241,48 @@ users see in published titles.
   user in that real page. Cookies, usernames/passwords, API keys/tokens and User-Agent
   are secret fields: they are encrypted in `secrets.json`, never plaintext in
   `config.json` or logs.
+- AniBT web accounts are separate from publishing groups: the AniBT-only sidebar has
+  `AniBT账号` above `字幕组仪表盘`. Credentials live in `AppData.anibtWebAccount`
+  and are encrypted with cookies in secrets.json; legacy per-group web credentials migrate once.
+  `main/anibt-web.ts` owns the shared `persist:abp-anibt-web` partition. Login first checks
+  the real session and returns immediately if authenticated (the sign-in redirect can fail
+  with ERR_FAILED). A sandboxed WebContentsView in the account page displays only AniBT's
+  real CAP widget and site error toasts. Keep the area compact (324 x 88 CSS pixels
+  initially); error toasts flow below the widget and expand the view only while present
+  so they cannot obscure its click target. Keep the original origin, React form and CAPTCHA
+  ticket exchange intact; never recreate/solve the challenge or expose a preload to it.
+  Fill React inputs using the native value setter and input events, wait for the user's
+  real CAPTCHA solve, then submit the form. Cancel/route leave destroys this temporary view;
+  successful login refreshes the cached dashboard. Only `/api/auth/get-session` with a user and
+  session confirms login; CAPTCHA cookies alone do not. Never use `redirect:manual` to
+  probe `/groups` (Electron throws `Redirect was cancelled`). Logout uses Better Auth's
+  `/api/auth/sign-out`; clear-cookie also clears this partition's storage/cache.
+- The dashboard is a sandboxed WebContentsView inside the main content area, without
+  Node or preload. The title bar owns the `AniBT账号` and `刷新` actions; the page itself
+  has no duplicate dashboard heading. Resize it with the route host, hide it when leaving
+  the route, and keep the loaded view cached for 15 minutes before destroying it (switching
+  to local mode, logout, or app close destroys it immediately). Dashboard sidebar popovers
+  and tooltips use a separate local WebContentsView above the live page, owned by
+  `main/dashboard-menu.ts`. Raise and position it before the first visible frame. Never
+  hide/capture the webpage for a menu: that freezes it and cannot support live changes.
+  The menu has a dedicated sandboxed preload with only layout/settings actions, receives
+  no secrets, and reuses `SidebarMenuContent.vue`; the main store remains the source of truth.
+  Dispose the menu renderer on route leave while retaining the remote-page cache. Do not
+  reparent an already topmost menu on settings changes. On close, detach it before hiding:
+  hiding an attached menu can leave the sibling webpage hidden and discard its mouse input.
+  Menu entry starts only after the native view is positioned and visible; exit waits for
+  animationend before detaching. Reduced motion acknowledges immediately. Guard callbacks
+  by request id so a stale exit cannot close a newly opened menu; disposal stays immediate.
+  Keep the dashboard unthrottled only while visible and restore throttling when cached. Do not
+  wait for animation frames in an invisible view (it may not paint). CSS z-index cannot
+  outrank native views. Remote pages follow app light/dark via
+  AniBT's `theme` localStorage key, root class/colorScheme and palette; never reload for themes.
+  The offline probe intercepts all sessions and covers login/cancellation, shared cookies,
+  embedded bounds/lifecycle, first-frame native stacking, visible theme pixels and language
+  changes with the menu kept open, all collapsed sidebar tooltips and secret redaction without real network.
+  Client locale changes sync to AniBT's host-only `PARAGLIDE_LOCALE` cookie
+  (zh-CN→zh, zh-TW→zh-Hant, en→en) and reload a loaded dashboard/login page once.
+  Re-selecting the same language must not reload. Preserve authentication cookies.
 - The editor source of truth is Markdown. AniBT/Nyaa receive Markdown; DMHY, both AcgnX
   sites and Bangumi.moe receive HTML from `markdown-it`; Mikan receives BBCode;
   ACG.RIP receives Markdown wrapped in `[markdown]` / `[/markdown]`.

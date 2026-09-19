@@ -155,13 +155,21 @@ export async function openSiteLogin(
     const script = fillScript(site, account)
     if (script) void win.webContents.executeJavaScript(script).catch(() => undefined)
   })
-  await win.loadURL(url)
   return new Promise((resolve) => {
+    let loadError = ''
     win.once('closed', () => {
       void (async () => {
-        const verified = await verifySiteLogin(ses, site)
+        const verified = loadError
+          ? { ok: false, message: loadError }
+          : await verifySiteLogin(ses, site)
         resolve(await captureResult(ses, site, account, verified.ok, verified.message))
       })()
+    })
+    void win.loadURL(url).catch((error: unknown) => {
+      // Closing during navigation is normal; verify the captured session on close.
+      if (/Redirect was cancelled/i.test(String(error)) || win.isDestroyed()) return
+      loadError = String(error)
+      if (!win.isDestroyed()) win.close()
     })
   })
 }

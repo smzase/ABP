@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Trash2, Languages, Loader2, AlertCircle, ChevronDown, Search } from '@lucide/vue'
 import { CollapsibleRoot, CollapsibleTrigger, CollapsibleContent } from 'reka-ui'
@@ -13,6 +13,9 @@ import UiSwitch from '@renderer/components/ui/UiSwitch.vue'
 import UiCard from '@renderer/components/ui/UiCard.vue'
 import UiTooltip from '@renderer/components/ui/UiTooltip.vue'
 import UiDialog from '@renderer/components/ui/UiDialog.vue'
+import UiTagInput from '@renderer/components/ui/UiTagInput.vue'
+import BgmSearchDialog from './BgmSearchDialog.vue'
+import TemplateVariables from './TemplateVariables.vue'
 import { confirm } from '@renderer/lib/confirm.ts'
 import { cn } from '@renderer/lib/utils.ts'
 import { renderTemplate } from '@shared/template.ts'
@@ -64,6 +67,28 @@ watch(mikanBangumiIdText, (value) => {
 })
 
 const mikanSearchOpen = ref(false)
+const bgmSearchOpen = ref(false)
+const variablesOpen = ref(false)
+const titleInput = ref<HTMLTextAreaElement>()
+
+function patchCustomTags(tags: string[]): void {
+  if (!tpl.value) return
+  tpl.value.customTags = [...tags]
+  touch()
+}
+
+async function insertTitleVariable(name: string): Promise<void> {
+  if (!tpl.value || !titleInput.value) return
+  const el = titleInput.value
+  const value = tpl.value.titleTemplates[activeVariant.value]
+  const start = el.selectionStart
+  const end = el.selectionEnd
+  const token = `{{${name}}}`
+  patchTitleTpl(activeVariant.value, value.slice(0, start) + token + value.slice(end))
+  await nextTick()
+  el.focus()
+  el.setSelectionRange(start + token.length, start + token.length)
+}
 const mikanSearchQuery = ref('')
 const mikanSearching = ref(false)
 const mikanSearched = ref(false)
@@ -278,7 +303,7 @@ const titlePreview = computed(() => {
     bitDepth: '10bit',
     audioCodec: 'AAC',
     source: 'WEB-DL',
-    customTags: [],
+    customTags: tpl.value.customTags,
     languages: [...SAMPLE_LANGS[activeVariant.value], 'JP'],
     subtitleType: 'EMBEDDED'
   })
@@ -315,10 +340,17 @@ async function remove(): Promise<void> {
       <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
         <div class="flex flex-col gap-1.5">
           <UiLabel>{{ t('tpl.bgmId') }} <template v-if="needsBgmId">*</template></UiLabel>
-          <div class="relative">
-            <UiInput v-model="bgmIdText" :class="cn(missingBgmId && 'border-destructive')" placeholder="400602" />
-            <UiTooltip v-if="missingBgmId" :content="t('tpl.needBgmId')">
-              <AlertCircle class="absolute right-2.5 top-2.5 h-4 w-4 text-destructive" />
+          <div class="flex gap-1.5">
+            <div class="relative min-w-0 flex-1">
+              <UiInput v-model="bgmIdText" data-probe="anime-bgm-id" :class="cn(missingBgmId && 'border-destructive')" />
+              <UiTooltip v-if="missingBgmId" :content="t('tpl.needBgmId')">
+                <AlertCircle class="absolute right-2.5 top-2.5 h-4 w-4 text-destructive" />
+              </UiTooltip>
+            </div>
+            <UiTooltip :content="t('tpl.searchBgmId')">
+              <UiButton variant="outline" size="icon" data-probe="bgm-search-open" :aria-label="t('tpl.searchBgmId')" @click="bgmSearchOpen = true">
+                <Search class="h-4 w-4" />
+              </UiButton>
             </UiTooltip>
           </div>
         </div>
@@ -327,7 +359,7 @@ async function remove(): Promise<void> {
           <UiLabel>{{ t('tpl.mikanBangumiId') }} <template v-if="needsMikanId">*</template></UiLabel>
           <div class="flex gap-1.5">
             <div class="relative min-w-0 flex-1">
-              <UiInput v-model="mikanBangumiIdText" :class="cn(missingMikanId && 'border-destructive')" placeholder="3599" />
+              <UiInput v-model="mikanBangumiIdText" data-probe="anime-mikan-bangumi-id" :class="cn(missingMikanId && 'border-destructive')" />
               <UiTooltip v-if="missingMikanId" :content="t('tpl.needMikanBangumiId')">
                 <AlertCircle class="absolute right-2.5 top-2.5 h-4 w-4 text-destructive" />
               </UiTooltip>
@@ -382,9 +414,13 @@ async function remove(): Promise<void> {
 
         <div class="flex flex-col gap-1.5">
           <UiLabel>{{ t('tpl.nameNative') }}</UiLabel>
-          <UiInput :model-value="tpl.names.native" @update:model-value="(v: string) => patchNames('native', v)" />
+          <UiInput :model-value="tpl.names.native" data-probe="anime-native-name" @update:model-value="(v: string) => patchNames('native', v)" />
         </div>
-</div>
+        <div class="flex min-w-0 flex-col gap-1.5">
+          <UiLabel>{{ t('publish.customTags') }}</UiLabel>
+          <UiTagInput :model-value="tpl.customTags" data-probe="anime-custom-tags" :placeholder="t('publish.customTagsHint')" @update:model-value="patchCustomTags" />
+        </div>
+      </div>
 
       <!-- Nyaa 代发与更多项固定在未展开的第一行。 -->
       <CollapsibleRoot v-model:open="nyaaMoreOpen" class="mt-3 w-full" data-probe="nyaa-more">
@@ -537,6 +573,7 @@ async function remove(): Promise<void> {
       </CollapsibleRoot>
     </UiCard>
 
+    <BgmSearchDialog v-model:open="bgmSearchOpen" pick-only :initial-query="tpl.names.zh || tpl.names.native || tpl.names.romaji || tpl.names.en" @select="item => bgmIdText = String(item.bgmId)" />
     <UiDialog v-model:open="mikanSearchOpen" :title="t('tpl.searchMikanBangumi')">
       <div class="flex gap-2">
         <UiInput
@@ -624,15 +661,30 @@ async function remove(): Promise<void> {
         </div>
       </div>
       <textarea
+        ref="titleInput"
+        data-probe="anime-title-template"
         :value="tpl.titleTemplates[activeVariant]"
         rows="3"
         class="w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-sm leading-relaxed break-all whitespace-pre-wrap shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
         spellcheck="false"
         @input="(e: Event) => patchTitleTpl(activeVariant, (e.target as HTMLTextAreaElement).value)"
       />
-      <p v-if="titleTplValue === CUSTOM" class="mt-1.5 text-xs text-muted-foreground">
-        {{ t('tpl.customTplHint') }}
-      </p>
+      <CollapsibleRoot v-model:open="variablesOpen" class="mt-2">
+        <div class="flex items-center justify-end gap-3">
+          <p v-if="titleTplValue === CUSTOM" class="min-w-0 flex-1 text-xs text-muted-foreground" data-probe="anime-custom-title-hint">
+            {{ t('tpl.customTplHint') }}
+          </p>
+          <CollapsibleTrigger as-child>
+            <UiButton variant="ghost" size="sm" class="shrink-0" data-probe="anime-variables-trigger">
+              <ChevronDown class="h-4 w-4 transition-transform" :class="variablesOpen && 'rotate-180'" />
+              {{ t('tpl.variables') }}
+            </UiButton>
+          </CollapsibleTrigger>
+        </div>
+        <CollapsibleContent class="overflow-hidden data-[state=open]:animate-collapsible-down data-[state=closed]:animate-collapsible-up">
+          <TemplateVariables class="pt-3" @insert="insertTitleVariable" />
+        </CollapsibleContent>
+      </CollapsibleRoot>
     </UiCard>
 
     <!-- ③ 简介 -->

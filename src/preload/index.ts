@@ -1,13 +1,18 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { DashboardMenuEvent, DashboardMenuRequest, DashboardMenuSettings } from '../shared/dashboard-menu.ts'
 import type {
   AppData,
+  AnibtWebAccount,
+  DashboardBounds,
   IpcChannels,
   LocalPublishPayload,
+  Locale,
   MikanSearchKind,
   ProxySettings,
   PublishPayload,
   PublishSite,
-  SiteAccountConfig
+  SiteAccountConfig,
+  ThemeMode
 } from '../shared/types.ts'
 
 /**
@@ -24,6 +29,10 @@ const api = {
   loadStore: (): Promise<AppData> => invoke('store:load'),
   saveStore: (data: AppData): Promise<void> => invoke('store:save', data),
   openConfigDir: (): Promise<string> => invoke('store:openDir'),
+  getConfigDir: () => invoke('store:getDir'),
+  pickConfigDir: () => invoke('store:pickDir'),
+  changeConfigDir: (directory: string, data: AppData) => invoke('store:changeDir', directory, data),
+  listFonts: () => invoke('system:listFonts'),
 
   // 窗口
   minimizeWindow: (): Promise<void> => invoke('window:minimize'),
@@ -43,6 +52,32 @@ const api = {
   anibtPublish: (payload: PublishPayload) => invoke('anibt:publish', payload),
   anibtDeleteRelease: (apiKey: string, releaseId: string) => invoke('anibt:deleteRelease', apiKey, releaseId),
   anibtDeletionStatus: (apiKey: string, releaseId: string) => invoke('anibt:deletionStatus', apiKey, releaseId),
+  loginAnibtWeb: (account: AnibtWebAccount, themeMode: ThemeMode, bounds: DashboardBounds) => invoke('anibt:webLogin', account, themeMode, bounds),
+  cancelAnibtWebLogin: () => invoke('anibt:cancelWebLogin'),
+  setAnibtWebLoginBounds: (bounds: DashboardBounds) => invoke('anibt:setWebLoginBounds', bounds),
+  onAnibtWebLoginHeight: (callback: (height: number) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, height: number): void => callback(height)
+    ipcRenderer.on('anibt:webLoginHeight', listener)
+    return () => ipcRenderer.removeListener('anibt:webLoginHeight', listener)
+  },
+  checkAnibtWeb: () => invoke('anibt:webCheck'),
+  logoutAnibtWeb: (clearAll: boolean) => invoke('anibt:webLogout', clearAll),
+  openAnibtDashboard: (bounds: DashboardBounds, themeMode: ThemeMode) =>
+    invoke('anibt:openDashboard', bounds, themeMode),
+  setAnibtDashboardBounds: (bounds: DashboardBounds) => invoke('anibt:setDashboardBounds', bounds),
+  setAnibtDashboardVisible: (visible: boolean) => invoke('anibt:setDashboardVisible', visible),
+  showDashboardMenu: (request: DashboardMenuRequest) => invoke('anibt:showDashboardMenu', request),
+  hideDashboardMenu: (id?: string) => invoke('anibt:hideDashboardMenu', id),
+  updateDashboardMenu: (settings: DashboardMenuSettings) => invoke('anibt:updateDashboardMenu', settings),
+  onDashboardMenuEvent: (callback: (event: DashboardMenuEvent) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, value: DashboardMenuEvent): void => callback(value)
+    ipcRenderer.on('anibt:dashboardMenuEvent', listener)
+    return () => ipcRenderer.removeListener('anibt:dashboardMenuEvent', listener)
+  },
+  reloadAnibtDashboard: () => invoke('anibt:reloadDashboard'),
+  setAnibtWebLocale: (locale: Locale) => invoke('anibt:setWebLocale', locale),
+  setAnibtDashboardTheme: (themeMode: ThemeMode) => invoke('anibt:setDashboardTheme', themeMode),
+  closeAnibtDashboard: () => invoke('anibt:closeDashboard'),
 
   // 备用本地直发 / 站点账号
   localPublish: (payload: LocalPublishPayload) => invoke('local:publish', payload),

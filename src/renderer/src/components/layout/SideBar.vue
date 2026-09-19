@@ -8,19 +8,18 @@ import {
   Users,
   History,
   Settings,
+  LayoutDashboard,
+  UserRound,
   PanelLeftClose,
   PanelLeftOpen,
   Palette,
-  Languages,
-  Sun,
-  Moon,
-  Check
+  Languages
 } from '@lucide/vue'
 import { useAppStore } from '@renderer/stores/app.ts'
 import UiTooltip from '@renderer/components/ui/UiTooltip.vue'
 import UiPopover from '@renderer/components/ui/UiPopover.vue'
-import { LOCALE_LABELS } from '@renderer/i18n/index.ts'
-import type { Locale } from '@shared/types.ts'
+import SidebarMenuContent from './SidebarMenuContent.vue'
+import type { DashboardMenuAction } from '@shared/dashboard-menu.ts'
 
 /**
  * 侧边栏：发布 / 番剧模板 / 站点账号 / 发布记录 / 设置。
@@ -33,6 +32,11 @@ const router = useRouter()
 const app = useAppStore()
 
 const collapsed = computed(() => app.data.settings.sidebarCollapsed)
+const isAnibtMode = computed(() => app.data.settings.publishMode === 'anibt')
+const WEB_ITEMS = [
+  { name: 'anibt-web-account', icon: UserRound, labelKey: 'nav.anibtWebAccount' },
+  { name: 'anibt-dashboard', icon: LayoutDashboard, labelKey: 'nav.dashboard' }
+] as const
 
 const NAV_ITEMS = [
   { name: 'publish', icon: UploadCloud, labelKey: 'nav.publish' },
@@ -54,17 +58,10 @@ function navigate(name: string): void {
   void router.push({ name })
 }
 
-function setAccent(color: string): void {
-  app.setAccent(color)
-}
-
-function onCustomColor(e: Event): void {
-  const target = e.target as HTMLInputElement
-  app.setAccent(target.value)
-}
-
-function setLocale(locale: Locale): void {
-  app.setLocale(locale)
+function menuAction(action: DashboardMenuAction): void {
+  if (action.type === 'theme') app.setThemeMode(action.value)
+  else if (action.type === 'locale') app.setLocale(action.value)
+  else app.setAccent(action.value)
 }
 </script>
 
@@ -97,13 +94,26 @@ function setLocale(locale: Locale): void {
           <span v-if="!collapsed" class="truncate">{{ t(item.labelKey) }}</span>
         </button>
       </UiTooltip>
+      <div v-if="isAnibtMode" class="mt-2 flex flex-col gap-1 border-t pt-2">
+        <UiTooltip v-for="item in WEB_ITEMS" :key="item.name" :content="t(item.labelKey)" side="right" :disabled="!collapsed">
+          <button
+            class="flex w-full cursor-pointer items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors"
+            :class="[collapsed ? 'justify-center px-0' : '', isActive(item.name) ? 'bg-primary/15 font-medium text-primary' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground']"
+            :data-probe="item.name"
+            @click="navigate(item.name)"
+          >
+            <component :is="item.icon" class="h-4.5 w-4.5 shrink-0" style="width: 18px; height: 18px" />
+            <span v-if="!collapsed" class="truncate">{{ t(item.labelKey) }}</span>
+          </button>
+        </UiTooltip>
+      </div>
     </nav>
 
     <!-- 底部：外观 / 语言 / 收起 -->
     <div class="flex items-center gap-1 border-t p-2" :class="collapsed ? 'flex-col' : ''">
       <div class="flex flex-1 items-center gap-1" :class="collapsed ? 'flex-col' : ''">
         <!-- 外观 -->
-        <UiPopover side="top" align="start">
+        <UiPopover side="top" align="start" dashboard-menu="appearance">
           <template #trigger>
             <button
               class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent"
@@ -112,74 +122,21 @@ function setLocale(locale: Locale): void {
               <Palette class="h-4 w-4" />
             </button>
           </template>
-          <div class="flex w-48 flex-col gap-3">
-            <div class="text-xs font-medium text-muted-foreground">{{ t('sidebar.appearance') }}</div>
-            <div class="flex gap-2">
-              <button
-                class="flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-xs hover:bg-accent"
-                :class="app.data.settings.appearance.mode === 'light' ? 'border-primary text-primary' : ''"
-                @click="app.setThemeMode('light')"
-              >
-                <Sun class="h-3.5 w-3.5" /> {{ t('sidebar.lightMode') }}
-              </button>
-              <button
-                class="flex flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-xs hover:bg-accent"
-                :class="app.data.settings.appearance.mode === 'dark' ? 'border-primary text-primary' : ''"
-                @click="app.setThemeMode('dark')"
-              >
-                <Moon class="h-3.5 w-3.5" /> {{ t('sidebar.darkMode') }}
-              </button>
-            </div>
-            <div class="text-xs font-medium text-muted-foreground">{{ t('sidebar.accentColor') }}</div>
-            <div class="flex items-center gap-2">
-              <button
-                v-for="color in app.accentPresets"
-                :key="color"
-                class="flex h-7 w-7 cursor-pointer items-center justify-center rounded-full border-2"
-                :class="app.data.settings.appearance.accent === color ? 'border-foreground/60' : 'border-transparent'"
-                :style="{ backgroundColor: color }"
-                @click="setAccent(color)"
-              >
-                <Check v-if="app.data.settings.appearance.accent === color" class="h-3.5 w-3.5 text-white" />
-              </button>
-              <label
-                class="relative flex h-7 w-7 cursor-pointer items-center justify-center overflow-hidden rounded-full border border-dashed text-muted-foreground"
-                :title="t('sidebar.customColor')"
-              >
-                <input
-                  type="color"
-                  class="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                  :value="app.data.settings.appearance.accent"
-                  @input="onCustomColor"
-                />
-                <span class="text-xs">+</span>
-              </label>
-            </div>
-          </div>
+          <SidebarMenuContent kind="appearance" :settings="app.data.settings" @action="menuAction" />
         </UiPopover>
 
         <!-- 语言 -->
-        <UiPopover side="top" align="start">
+        <UiPopover side="top" align="start" dashboard-menu="language">
           <template #trigger>
             <button
               class="flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent"
               :title="t('sidebar.language')"
+              data-probe="sidebar-language"
             >
               <Languages class="h-4 w-4" />
             </button>
           </template>
-          <div class="flex w-32 flex-col gap-0.5">
-            <button
-              v-for="l in LOCALE_LABELS"
-              :key="l.value"
-              class="flex cursor-pointer items-center justify-between rounded-md px-2 py-1.5 text-sm hover:bg-accent"
-              :class="app.data.settings.locale === l.value ? 'text-primary' : ''"
-              @click="setLocale(l.value)"
-            >
-              {{ l.label }}
-              <Check v-if="app.data.settings.locale === l.value" class="h-3.5 w-3.5" />
-            </button>
-          </div>
+          <SidebarMenuContent kind="language" :settings="app.data.settings" @action="menuAction" />
         </UiPopover>
       </div>
 

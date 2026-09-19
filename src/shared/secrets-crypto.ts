@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { PUBLISH_SITES, type GroupAccount, type PublishSite } from './types.ts'
+import { PUBLISH_SITES, type AnibtWebAccount, type GroupAccount, type PublishSite } from './types.ts'
 
 /**
  * secrets.json 的加解密核心：纯逻辑，不碰文件系统、不碰 Electron，node 直跑单测。
@@ -84,8 +84,14 @@ function secretKey(groupId: string, site: PublishSite, field: (typeof SITE_SECRE
 }
 
 /** 从 AppData.groups 抽出所有站点敏感字段。 */
-export function collectSecrets(groups: GroupAccount[]): SecretMap {
+export function collectSecrets(groups: GroupAccount[], web?: AnibtWebAccount): SecretMap {
   const out: SecretMap = {}
+  if (web) {
+    out['anibtWeb/username'] = web.username
+    out['anibtWeb/password'] = web.password
+    out['anibtWeb/userAgent'] = web.userAgent
+    out['anibtWeb/cookies'] = JSON.stringify(web.cookies)
+  }
   for (const g of groups) {
     for (const site of PUBLISH_SITES) {
       const account = g.sites[site]
@@ -104,7 +110,16 @@ export function collectSecrets(groups: GroupAccount[]): SecretMap {
 }
 
 /** 把 secrets.json 合回清洗后的配置，兼容旧版 groupId → AniBT API Key。 */
-export function mergeSecrets(groups: GroupAccount[], secrets: SecretMap): void {
+export function mergeSecrets(groups: GroupAccount[], secrets: SecretMap, web?: AnibtWebAccount): void {
+  if (web) {
+    for (const field of ['username', 'password', 'userAgent'] as const) {
+      if (typeof secrets['anibtWeb/' + field] === 'string') web[field] = secrets['anibtWeb/' + field]
+    }
+    try {
+      const cookies: unknown = JSON.parse(secrets['anibtWeb/cookies'] ?? '[]')
+      if (Array.isArray(cookies)) web.cookies = cookies
+    } catch { web.cookies = [] }
+  }
   for (const group of groups) {
     const legacy = secrets[group.id]
     if (legacy) group.sites.anibt.apiKey = legacy

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { Minus, Square, X } from '@lucide/vue'
-import { computed } from 'vue'
+import { Minus, RefreshCw, Square, UserRound, X } from '@lucide/vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '@renderer/stores/app.ts'
 import { cn } from '@renderer/lib/utils.ts'
 
@@ -11,10 +12,23 @@ import { cn } from '@renderer/lib/utils.ts'
  */
 const app = useAppStore()
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 const mode = computed(() => app.data.settings.publishMode)
+const isDashboard = computed(() => mode.value === 'anibt' && route.name === 'anibt-dashboard')
+const refreshingDashboard = ref(false)
 
 function setMode(next: 'anibt' | 'local'): void {
   app.data.settings.publishMode = next
+  if (next === 'local') void window.api.closeAnibtDashboard()
+}
+function openWebAccount(): void {
+  void router.push({ name: 'anibt-web-account' })
+}
+async function refreshDashboard(): Promise<void> {
+  if (refreshingDashboard.value) return
+  refreshingDashboard.value = true
+  try { await window.api.reloadAnibtDashboard() } finally { refreshingDashboard.value = false }
 }
 function minimize(): void {
   void window.api.minimizeWindow()
@@ -41,7 +55,26 @@ function close(): void {
         {{ item.label }}
       </button>
     </div>
-    <div class="app-no-drag flex items-center">
+    <div class="app-no-drag flex min-w-0 items-center">
+      <div v-if="isDashboard" class="mr-2 flex min-w-0 items-center gap-1">
+        <button
+          class="flex h-9 cursor-pointer items-center gap-1.5 rounded-md px-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+          data-probe="titlebar-anibt-account"
+          @click="openWebAccount"
+        >
+          <UserRound class="h-4 w-4" />
+          <span>{{ t('nav.anibtWebAccount') }}</span>
+        </button>
+        <button
+          class="flex h-9 cursor-pointer items-center gap-1.5 rounded-md px-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          data-probe="titlebar-dashboard-refresh"
+          :disabled="refreshingDashboard"
+          @click="refreshDashboard"
+        >
+          <RefreshCw class="h-4 w-4" :class="refreshingDashboard ? 'animate-spin' : ''" />
+          <span>{{ t('webAccount.reload') }}</span>
+        </button>
+      </div>
       <button
         class="flex h-11 w-11 cursor-pointer items-center justify-center text-muted-foreground hover:bg-accent"
         @click="minimize"
