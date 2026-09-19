@@ -905,6 +905,39 @@ ok('Markdown 转蜜柑 BBCode 覆盖分隔线、粗体、链接和图片', () =>
   assert.match(bbcode, /\[url=https:\/\/example.com\]link\[\/url\]/)
   assert.match(bbcode, /\[img\]https:\/\/example.com\/a.jpg\[\/img\]/)
 })
+ok('Mikan BBCode 使用 SCEditor 兼容的嵌套列表、表格和代码块标签', () => {
+  const source = [
+    '# 标题',
+    '',
+    '- 外层',
+    '  1. 内层',
+    '',
+    '| 角色 | 特点 |',
+    '| --- | --- |',
+    '| 星野日向 | 喜欢白咲花 |',
+    '',
+    '> 引用',
+    '',
+    '[参考][id]',
+    '',
+    '[id]: https://example.com "标题"',
+    '    const x = 1',
+    '    return x',
+    '',
+    'Setext',
+    '===',
+  ].join('\n')
+  const bbcode = markdownToBbcode(source)
+  assert.match(bbcode, /^\[size=4\]\[b\]标题\[\/b\]\[\/size\]/)
+  assert.match(bbcode, /\[ul\]\n\[li\]外层\n\[ol\]\n\[li\]内层\[\/li\]\n\[\/ol\]\[\/li\]\n\[\/ul\]/)
+  assert.match(bbcode, /\[table\]\n\[tr\]\[th\]角色\[\/th\]\[th\]特点\[\/th\]\[\/tr\]/)
+  assert.match(bbcode, /\[td\]星野日向\[\/td\]\[td\]喜欢白咲花\[\/td\]/)
+  assert.match(bbcode, /\[quote\]引用\[\/quote\]/)
+  assert.match(bbcode, /\[url=https:\/\/example.com\]参考\[\/url\]/)
+  assert.match(bbcode, /\[code\]const x = 1\nreturn x\[\/code\]/)
+  assert.match(bbcode, /\[size=4\]\[b\]Setext\[\/b\]\[\/size\]/)
+  assert.ok(!bbcode.includes('[list=1]'))
+})
 ok('ACG.RIP 使用 markdown 包裹；Mikan payload 永不含 trackers', () => {
   assert.equal(formatDescription('acgrip', 'hello'), '[markdown]\n\nhello\n\n[/markdown]')
   const body = buildMikanRequestBody({
