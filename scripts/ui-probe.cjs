@@ -1238,6 +1238,10 @@ app.whenReady().then(async () => {
     if (e.level === 'error' || e.level === 3) errors.push(String(e.message).slice(0, 300))
   })
   win.setSize(1280, 860)
+  // Keep the automation window above the desktop/runner UI. Otherwise Windows
+  // can occlude native child views and discard their synthetic pointer input.
+  // This affects only this isolated probe process, never the shipped app.
+  win.setAlwaysOnTop(true)
   // Real pointer events need focus; background throttling can stall closing overlays.
   win.webContents.setBackgroundThrottling(false)
   win.show()

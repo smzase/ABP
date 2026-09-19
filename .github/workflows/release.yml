@@ -58,7 +58,8 @@ jobs:
       # 当前真窗口探针与产物冒烟脚本使用 Windows 的配置目录和 exe 路径。
       - name: Test Windows UI
         if: runner.os == 'Windows'
-        run: npm run probe
+        # 覆盖 Windows runner 关闭系统动画的环境；探针内部显式测试两种动态效果偏好。
+        run: npm run probe -- --force-prefers-reduced-motion
 
       # pack:* 脚本都显式带 --publish never，不创建或更新 GitHub Releases。
       - name: Package ${{ matrix.platform }} ${{ matrix.arch }}

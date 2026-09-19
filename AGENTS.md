@@ -397,6 +397,16 @@ For the same reason `clickElementAt` re-reads the element's rect immediately bef
 dispatching: anything that re-renders in between (typing, a store patch, a list reorder)
 invalidates coordinates captured earlier.
 
+**Animation probes must control reduced motion explicitly.** Windows CI may report
+`prefers-reduced-motion: reduce`. In the dashboard menu's own WebContents, use CDP media
+emulation to test `no-preference`, then `reduce`, then explicitly `no-preference` for
+Tooltip animations. Clear the override only after all animation checks; an empty
+feature list restores the host preference, not necessarily animations. Keep real
+animation-event assertions and reduced-motion checks. CI runs
+`npm run probe -- --force-prefers-reduced-motion` to cover this host setting without
+changing shipped accessibility behavior. Focus the parent window as well as the target
+WebContents before sending native-view pointer events.
+
 On this Windows dev box `ELECTRON_RUN_AS_NODE=1` is set in the environment, which makes
 `electron.exe` run any script as plain node (`require('electron')` then returns a path
 string and `app` is undefined). Clear it first:

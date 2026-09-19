@@ -193,3 +193,9 @@ $env:ELECTRON_RUN_AS_NODE=$null; $env:NODE_OPTIONS=""
   变量面板把 titleZh 放在 titleZhHans/titleZhHant 前；version 和 versionSuffix 均隐藏 v1。
 
 改完 UI 记得 `npm run build && npm run probe` —— 上面这几类问题只有真窗口能抓到。
+
+动画探针不能假定 Windows 开启系统动画。仪表盘浮窗用其自身 WebContents 的 CDP
+显式依次测试 no-preference / reduce / no-preference（Tooltip），全部断言结束再清理。
+features: [] 会恢复宿主偏好，不等于开启动画。CI 用
+`npm run probe -- --force-prefers-reduced-motion` 回归这个环境；保留真实动画事件和
+减少动态效果两种检查，不修改产品的无障碍行为。原生视图点击前同时聚焦主窗口和视图。

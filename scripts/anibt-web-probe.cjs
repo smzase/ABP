@@ -93,6 +93,7 @@ async function until(fn, timeout = 8000) {
 
 async function run({ win, js, check, waitFor, clickElementAt, typeText, nav, sandbox }) {
   const click = selector => {
+    win.focus()
     win.webContents.focus()
     return clickElementAt(win, `document.querySelector(${JSON.stringify(selector)})`)
   }
@@ -102,9 +103,29 @@ async function run({ win, js, check, waitFor, clickElementAt, typeText, nav, san
   const menuView = () => win.contentView.children.find(v => v.webContents?.getURL().includes('/dashboard-menu.html'))
   const menuOnTop = () => menuView()?.getVisible() && nativeView()?.getVisible() &&
     win.contentView.children.indexOf(menuView()) > win.contentView.children.indexOf(nativeView())
-  const clickMenu = selector => {
-    menuView().webContents.focus()
-    return clickElementAt(menuView(), `document.querySelector(${JSON.stringify(selector)})`)
+  const clickMenu = async selector => {
+    const target = menuView()
+    if (!target) throw new Error('Native menu was missing before input')
+    // A freshly switched menu is visible before layout/presentation and its
+    // entry animation finish. Click only after the target stops moving.
+    if (!await waitFor(target, "document.querySelector('.native-menu-panel')?.dataset.phase==='open' && document.querySelector('.native-menu-panel').getAnimations().every(a=>a.playState==='finished')")) {
+      throw new Error('Native menu did not settle before input')
+    }
+    win.focus()
+    target.webContents.focus()
+    if (!await waitFor(target, 'document.hasFocus()')) throw new Error('Native menu did not receive input focus')
+    return clickElementAt(target, `document.querySelector(${JSON.stringify(selector)})`)
+  }
+  const focusChallenge = async login => {
+    // Native visibility alone does not guarantee Windows will deliver input.
+    win.focus()
+    login.webContents.focus()
+    if (!await waitFor(login, "document.hasFocus() && document.visibilityState==='visible'")) {
+      console.error('Offline login input state:', { parentVisible: win.isVisible(), parentFocused: win.isFocused(),
+        minimized: win.isMinimized(), nativeVisible: login.getVisible(), bounds: login.getBounds(),
+        page: await js(login, "({focused:document.hasFocus(),visibility:document.visibilityState})") })
+      throw new Error('Offline login fixture did not become visible and focused')
+    }
   }
   const hoverSelector = async selector => {
     const rect = await js(win, `(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)return null;const r=e.getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)}})()`)
@@ -161,9 +182,10 @@ async function run({ win, js, check, waitFor, clickElementAt, typeText, nav, san
   login = await until(challengeView)
   if (!login) throw new Error('Retry verification was not created')
   await waitFor(login, `window.formState?.password==='web-probe-password'`)
-  login.webContents.focus()
+  await focusChallenge(login)
   await clickElementAt(login, `document.querySelector('#human')`)
-  check('错误凭据在内嵌区域展示网站错误并可重试', await waitFor(login, `document.querySelector('#error')?.textContent.includes('邮箱或密码错误') && document.querySelector('#error').getBoundingClientRect().height>0`))
+  check('错误凭据在内嵌区域展示网站错误并可重试', await waitFor(login, `document.querySelector('#error')?.textContent.includes('邮箱或密码错误') && document.querySelector('#error').getBoundingClientRect().height>0`),
+    await js(login, "JSON.stringify({focus:document.hasFocus(),visibility:document.visibilityState,solved:window.challenge,installed:window.__abpLoginInstalled,valid:document.querySelector('form').checkValidity(),error:document.querySelector('#error').textContent})"))
   check('错误提示按需撑开高度且不遮挡验证码', await waitFor(login,
     "(()=>{const e=document.querySelector('#human'),r=e.getBoundingClientRect(),error=document.querySelector('#error').getBoundingClientRect();return error.top>=document.querySelector('cap-widget').getBoundingClientRect().bottom&&error.bottom<=innerHeight&&document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)===e})()"))
   await js(login, "document.querySelector('#error').textContent=''")
@@ -197,6 +219,21 @@ async function run({ win, js, check, waitFor, clickElementAt, typeText, nav, san
   const loads = groupLoads
   const menu = await until(menuView)
   if (!menu) throw new Error('Native menu renderer was not created')
+  // Windows CI can disable animations at the OS level. Pin each tested preference
+  // in this renderer instead of assuming the host uses no-preference. Clearing
+  // emulation midway would restore reduce on those runners and break Tooltip tests.
+  const hostReducedMotion = await js(menu, "matchMedia('(prefers-reduced-motion: reduce)').matches")
+  console.log(`  Dashboard menu host reduced motion: ${hostReducedMotion}`)
+  menu.webContents.debugger.attach('1.3')
+  const setMotion = async value => {
+    await menu.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-reduced-motion', value }]
+    })
+    const applied = await waitFor(menu, `matchMedia('(prefers-reduced-motion: ${value})').matches`)
+    check(`仪表盘动画测试偏好已生效：${value}`, applied)
+    if (!applied) throw new Error(`Failed to emulate prefers-reduced-motion: ${value}`)
+  }
+  await setMotion('no-preference')
   await js(menu, "window.menuAnimations=[];for(const name of ['animationstart','animationend'])document.addEventListener(name,e=>{if(e.target.classList.contains('native-menu-panel'))window.menuAnimations.push({event:name,name:e.animationName,phase:e.target.dataset.phase})},true)")
   let pageHides = 0
   let menuShows = 0
@@ -273,15 +310,13 @@ async function run({ win, js, check, waitFor, clickElementAt, typeText, nav, san
   await view.webContents.insertText('after-menu')
   check('原生菜单关闭后网页能正常输入', await waitFor(view, "document.querySelector('#draft').value==='after-menu'"),
     await js(view, "JSON.stringify({value:document.querySelector('#draft').value,active:document.activeElement?.tagName,focus:document.hasFocus(),visibility:document.visibilityState})"))
-  menu.webContents.debugger.attach('1.3')
-  await menu.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+  await setMotion('reduce')
   await click('aside button[title="外观"]')
   await until(menuOnTop)
-  check('原生浮窗遵循减少动态效果设置', await js(menu, "getComputedStyle(document.querySelector('.native-menu-panel')).animationName==='none'"))
+  check('原生浮窗遵循减少动态效果设置', await waitFor(menu, "document.querySelector('.native-menu-panel')?.dataset.phase==='open' && getComputedStyle(document.querySelector('.native-menu-panel')).animationName==='none'"))
   await click('aside button[title="外观"]')
   check('减少动态效果时无需等待不存在的动画即可关闭', await until(() => !menu.getVisible()))
-  await menu.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] })
-  menu.webContents.debugger.detach()
+  await setMotion('no-preference')
   await click('aside > div:last-child > button')
   check('收起侧栏后网页随内容区域缩放', !!(await until(() => nativeView()?.getBounds().x === 56)))
   const navCount = await js(win, "document.querySelectorAll('aside nav button').length")
@@ -300,6 +335,10 @@ async function run({ win, js, check, waitFor, clickElementAt, typeText, nav, san
   check('打开菜单、换主题、换语言、悬停全程从未隐藏网页', pageHides === 0, String(pageHides))
   view.setVisible = originalPageVisible
   menu.setVisible = originalMenuVisible
+  await menu.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] })
+  menu.webContents.debugger.detach()
+  check('动画测试结束后恢复宿主动态效果偏好', await js(menu,
+    `matchMedia('(prefers-reduced-motion: reduce)').matches===${hostReducedMotion}`))
   await click('aside > div:last-child > button')
   await until(() => nativeView()?.getBounds().x === 160)
   const actual = view.getBounds()
@@ -351,7 +390,7 @@ async function run({ win, js, check, waitFor, clickElementAt, typeText, nav, san
   login = await until(challengeView)
   if (!login) throw new Error('Relogin verification was not created')
   await waitFor(login, "window.formState?.password==='web-probe-password'")
-  login.webContents.focus()
+  await focusChallenge(login)
   await clickElementAt(login, "document.querySelector('#human')")
   check('登录成功刷新原先未登录的缓存仪表盘', await waitFor(win, "document.querySelector('[role=status]')?.textContent.includes('网页已登录')") &&
     !!(await until(() => groupLoads > beforeRelogin && anonymousDashboard.webContents.getURL() === 'https://anibt.net/groups')) && !anonymousDashboard.getVisible())
