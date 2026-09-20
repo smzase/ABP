@@ -24,7 +24,8 @@ import {
   initAnibtWeb, mergeLiveAnibtWebSession, loginAnibtWeb, checkAnibtWebLogin, logoutAnibtWeb,
   openAnibtDashboard, closeAnibtDashboard, updateAnibtDashboardBounds, updateAnibtDashboardTheme, setAnibtDashboardVisible, reloadAnibtDashboard, updateAnibtWebLocale,
   showDashboardMenu, hideDashboardMenu, updateDashboardMenu, dashboardMenuPainted, dashboardMenuAction,
-  cancelAnibtWebLogin, updateAnibtWebLoginBounds, dashboardMenuHidden
+  cancelAnibtWebLogin, updateAnibtWebLoginBounds, dashboardMenuHidden,
+  getDashboardNavigationState, navigateAnibtDashboard, subscribeDashboardNavigation
 } from './anibt-web.ts'
 
 /**
@@ -165,6 +166,11 @@ export function registerIpc(store: ConfigStore): void {
   ipcMain.handle('anibt:dashboardMenuHidden', (event, id: string) => dashboardMenuHidden(event.sender, id))
   ipcMain.handle('anibt:dashboardMenuAction', (event, ...args: Parameters<IpcChannels['anibt:dashboardMenuAction']>) => dashboardMenuAction(event.sender, ...args))
   handle('anibt:reloadDashboard', () => reloadAnibtDashboard())
+  ipcMain.handle('anibt:dashboardNavigationState', event => {
+    subscribeDashboardNavigation(event.sender)
+    return getDashboardNavigationState()
+  })
+  handle('anibt:navigateDashboard', action => navigateAnibtDashboard(action))
   handle('anibt:setWebLocale', (locale: 'zh-CN' | 'zh-TW' | 'en') => updateAnibtWebLocale(locale))
   handle('anibt:setDashboardTheme', (themeMode: 'light' | 'dark') => updateAnibtDashboardTheme(themeMode))
   handle('anibt:closeDashboard', () => closeAnibtDashboard())

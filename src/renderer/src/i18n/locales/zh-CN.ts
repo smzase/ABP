@@ -6,7 +6,11 @@ export default {
     records: '发布记录',
     settings: '设置',
     anibtWebAccount: 'AniBT账号',
-    dashboard: '字幕组仪表盘'
+    dashboard: '字幕组仪表盘',
+    dashboardImageHost: '图床',
+    dashboardAnimeTemplates: '番剧模板',
+    dashboardCustomTemplates: '自定义模板',
+    dashboardSync: '站点同步'
   },
   webAccount: {
     hint: '账号独立于发布组，仅用于 AniBT 网页。点击登录后，在下方完成“我是人类”验证，客户端会自动提交登录并确认会话。',

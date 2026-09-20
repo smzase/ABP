@@ -37,6 +37,12 @@ const WEB_ITEMS = [
   { name: 'anibt-web-account', icon: UserRound, labelKey: 'nav.anibtWebAccount' },
   { name: 'anibt-dashboard', icon: LayoutDashboard, labelKey: 'nav.dashboard' }
 ] as const
+const WEB_SUBITEMS = [
+  { destination: 'image-host', labelKey: 'nav.dashboardImageHost' },
+  { destination: 'anime_templates', labelKey: 'nav.dashboardAnimeTemplates' },
+  { destination: 'custom_templates', labelKey: 'nav.dashboardCustomTemplates' },
+  { destination: 'sync', labelKey: 'nav.dashboardSync' }
+] as const
 
 const NAV_ITEMS = [
   { name: 'publish', icon: UploadCloud, labelKey: 'nav.publish' },
@@ -55,7 +61,15 @@ function isActive(name: string): boolean {
 }
 
 function navigate(name: string): void {
-  void router.push({ name })
+  if (name === 'anibt-dashboard' && route.name === name) app.pendingDashboardDestination = 'home'
+  else {
+    app.pendingDashboardDestination = null
+    void router.push({ name })
+  }
+}
+function navigateDashboardChild(destination: typeof WEB_SUBITEMS[number]['destination']): void {
+  app.pendingDashboardDestination = destination
+  void router.push({ name: 'anibt-dashboard' })
 }
 
 function menuAction(action: DashboardMenuAction): void {
@@ -106,6 +120,19 @@ function menuAction(action: DashboardMenuAction): void {
             <span v-if="!collapsed" class="truncate">{{ t(item.labelKey) }}</span>
           </button>
         </UiTooltip>
+        <template v-if="app.webLoggedIn && app.dashboardGroupSlug">
+          <button
+            v-for="item in WEB_SUBITEMS"
+            :key="item.destination"
+            class="w-full cursor-pointer truncate rounded-md py-1.5 pl-11 pr-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+            :class="collapsed ? 'hidden' : ''"
+            data-dashboard-subitem
+            :data-probe="item.destination"
+            @click="navigateDashboardChild(item.destination)"
+          >
+            {{ t(item.labelKey) }}
+          </button>
+        </template>
       </div>
     </nav>
 

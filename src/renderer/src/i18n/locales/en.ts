@@ -6,7 +6,11 @@ export default {
     records: 'Records',
     settings: 'Settings',
     anibtWebAccount: 'AniBT account',
-    dashboard: 'Subtitle group dashboard'
+    dashboard: 'Subtitle group dashboard',
+    dashboardImageHost: 'Image host',
+    dashboardAnimeTemplates: 'Anime templates',
+    dashboardCustomTemplates: 'Custom templates',
+    dashboardSync: 'Site sync'
   },
   webAccount: {
     hint: 'This account is separate from publishing groups. Click Log in, then complete human verification below. The app submits the login and verifies your session automatically.',

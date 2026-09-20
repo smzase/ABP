@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { DashboardMenuEvent, DashboardMenuRequest, DashboardMenuSettings } from '../shared/dashboard-menu.ts'
+import type { DashboardNavigationAction, DashboardNavigationState } from '../shared/dashboard-navigation.ts'
 import type {
   AppData,
   AnibtWebAccount,
@@ -75,6 +76,13 @@ const api = {
     return () => ipcRenderer.removeListener('anibt:dashboardMenuEvent', listener)
   },
   reloadAnibtDashboard: () => invoke('anibt:reloadDashboard'),
+  getDashboardNavigationState: () => invoke('anibt:dashboardNavigationState'),
+  navigateAnibtDashboard: (action: DashboardNavigationAction) => invoke('anibt:navigateDashboard', action),
+  onDashboardNavigationState: (callback: (state: DashboardNavigationState) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, state: DashboardNavigationState): void => callback(state)
+    ipcRenderer.on('anibt:dashboardNavigationStateChanged', listener)
+    return () => ipcRenderer.removeListener('anibt:dashboardNavigationStateChanged', listener)
+  },
   setAnibtWebLocale: (locale: Locale) => invoke('anibt:setWebLocale', locale),
   setAnibtDashboardTheme: (themeMode: ThemeMode) => invoke('anibt:setDashboardTheme', themeMode),
   closeAnibtDashboard: () => invoke('anibt:closeDashboard'),

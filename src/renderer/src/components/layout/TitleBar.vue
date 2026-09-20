@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Minus, RefreshCw, Square, UserRound, X } from '@lucide/vue'
+import { ArrowLeft, ArrowRight, Minus, RefreshCw, Square, UserRound, X } from '@lucide/vue'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -30,6 +30,9 @@ async function refreshDashboard(): Promise<void> {
   refreshingDashboard.value = true
   try { await window.api.reloadAnibtDashboard() } finally { refreshingDashboard.value = false }
 }
+async function navigateDashboard(action: 'back' | 'forward'): Promise<void> {
+  await window.api.navigateAnibtDashboard(action)
+}
 function minimize(): void {
   void window.api.minimizeWindow()
 }
@@ -57,6 +60,9 @@ function close(): void {
     </div>
     <div class="app-no-drag flex min-w-0 items-center">
       <div v-if="isDashboard" class="mr-2 flex min-w-0 items-center gap-1">
+        <button class="flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40" data-probe="titlebar-dashboard-back" :disabled="!app.dashboardCanGoBack" title="Back" @click="navigateDashboard('back')"><ArrowLeft class="h-4 w-4" /></button>
+        <button class="flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40" data-probe="titlebar-dashboard-forward" :disabled="!app.dashboardCanGoForward" title="Forward" @click="navigateDashboard('forward')"><ArrowRight class="h-4 w-4" /></button>
+        <button class="flex h-9 w-9 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50" data-probe="titlebar-dashboard-refresh" :disabled="refreshingDashboard" title="Refresh" @click="refreshDashboard"><RefreshCw class="h-4 w-4" :class="refreshingDashboard ? 'animate-spin' : ''" /></button>
         <button
           class="flex h-9 cursor-pointer items-center gap-1.5 rounded-md px-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
           data-probe="titlebar-anibt-account"
@@ -64,15 +70,6 @@ function close(): void {
         >
           <UserRound class="h-4 w-4" />
           <span>{{ t('nav.anibtWebAccount') }}</span>
-        </button>
-        <button
-          class="flex h-9 cursor-pointer items-center gap-1.5 rounded-md px-2 text-sm text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-          data-probe="titlebar-dashboard-refresh"
-          :disabled="refreshingDashboard"
-          @click="refreshDashboard"
-        >
-          <RefreshCw class="h-4 w-4" :class="refreshingDashboard ? 'animate-spin' : ''" />
-          <span>{{ t('webAccount.reload') }}</span>
         </button>
       </div>
       <button

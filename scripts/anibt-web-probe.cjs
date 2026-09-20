@@ -1,5 +1,5 @@
 // Offline AniBT fixture: no real credentials, auth requests or CAPTCHA service are used.
-const { BrowserWindow } = require('electron')
+const { BrowserWindow, clipboard, ClipboardItem } = require('electron')
 const fs = require('node:fs')
 const path = require('node:path')
 const isolated = new WeakSet()
@@ -29,7 +29,24 @@ document.querySelector('form').onsubmit=async e=>{e.preventDefault();if(!window.
  const r=await fetch('/api/auth/sign-in/email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(window.formState)});
  if(r.ok)location.href='/groups';else document.querySelector('#error').textContent='邮箱或密码错误';};
 </script></body></html>`
-const groupsHtml = '<!doctype html><html><head><meta name="theme-color"></head><body><h1>字幕组仪表盘（离线测试）</h1><input id="draft"><a href="https://example.invalid/">外部链接</a></body></html>'
+const groupsHtml = `<!doctype html><html><head><meta name="theme-color"></head><body>
+<h1>字幕组仪表盘（离线测试）</h1><input id="draft"><a href="https://example.invalid/">外部链接</a><a href="/groups/probe-group">Probe group</a>
+<button id="copy-link">复制链接</button><button id="copy-markdown">复制 Markdown</button><button id="copy-legacy">兼容复制</button>
+<script>
+window.copyResult='';
+document.querySelector('#copy-link').onclick=async()=>{
+ try { await navigator.clipboard.writeText('https://anibt.net/groups/probe-group');window.copyResult='link' }
+ catch(e) { window.copyResult=e.name }
+};
+document.querySelector('#copy-markdown').onclick=async()=>{
+ try { await navigator.clipboard.write([new ClipboardItem({'text/plain':new Blob(['![图片](https://example.invalid/image.png)'],{type:'text/plain'})})]);window.copyResult='markdown' }
+ catch(e) { window.copyResult=e.name }
+};
+document.querySelector('#copy-legacy').onclick=()=>{
+ const text=document.createElement('textarea');text.value='legacy-copy';document.body.append(text);text.select();
+ window.copyResult=document.execCommand('copy')?'legacy':'failed';text.remove();
+};
+</script></body></html>`
 
 function isolateSession(ses) {
   if (isolated.has(ses)) return
@@ -65,6 +82,10 @@ function isolateSession(ses) {
       await ses.cookies.remove('https://anibt.net', 'offline-session')
       return Response.json({ success: true })
     }
+    if (url.pathname.startsWith('/groups/probe-group')) {
+      groupLoads++
+      return new Response(groupsHtml, { headers: { 'Content-Type': 'text/html; charset=utf-8' } })
+    }
     if (url.pathname === '/groups') {
       groupLoads++
       if (!authenticated) return new Response('', { status: 302, headers: { Location: 'https://anibt.net/auth/sign-in?redirectTo=%2Fgroups' } })
@@ -92,9 +113,10 @@ async function until(fn, timeout = 8000) {
 }
 
 async function run({ win, js, check, waitFor, clickElementAt, typeText, nav, sandbox }) {
-  const click = selector => {
+  const click = async selector => {
     win.focus()
     win.webContents.focus()
+    if (!await waitFor(win, 'document.hasFocus()')) throw new Error(`Main window did not receive input focus before ${selector}`)
     return clickElementAt(win, `document.querySelector(${JSON.stringify(selector)})`)
   }
   const nativeView = () => win.contentView.children.find(v => v.webContents?.getURL().startsWith('https://anibt.net/'))
@@ -109,6 +131,8 @@ async function run({ win, js, check, waitFor, clickElementAt, typeText, nav, san
     // A freshly switched menu is visible before layout/presentation and its
     // entry animation finish. Click only after the target stops moving.
     if (!await waitFor(target, "document.querySelector('.native-menu-panel')?.dataset.phase==='open' && document.querySelector('.native-menu-panel').getAnimations().every(a=>a.playState==='finished')")) {
+      console.error('Native menu input state:', { selector, visible: target.getVisible(), focused: target.webContents.isFocused(),
+        page: await js(target, "(()=>{const p=document.querySelector('.native-menu-panel');return {phase:p?.dataset.phase,animations:p?.getAnimations().map(a=>({name:a.animationName,state:a.playState})),visibility:document.visibilityState}})()") })
       throw new Error('Native menu did not settle before input')
     }
     win.focus()
@@ -148,9 +172,12 @@ async function run({ win, js, check, waitFor, clickElementAt, typeText, nav, san
   check('未登录检查显示真实未登录状态，不报 Redirect was cancelled', await waitFor(win,
     `(()=>{const t=document.querySelector('[role=status]')?.textContent||'';return t.includes('尚未登录')&&!t.includes('Redirect was cancelled')})()`))
   await click('#anibt-web-email')
+  if (!await waitFor(win, "document.activeElement===document.querySelector('#anibt-web-email')")) throw new Error('Web email input did not receive focus')
   await typeText(win, 'probe@example.invalid')
   await click('#anibt-web-password')
+  if (!await waitFor(win, "document.activeElement===document.querySelector('#anibt-web-password')")) throw new Error('Web password input did not receive focus')
   await typeText(win, 'web-probe-password')
+  if (!await waitFor(win, "document.querySelector('#anibt-web-email').value==='probe@example.invalid' && document.querySelector('#anibt-web-password').value==='web-probe-password'")) throw new Error('Offline login credentials were not fully typed')
   await click('[data-probe=web-login]')
   let login = await until(challengeView)
   if (!login) throw new Error('Inline verification was not created')
@@ -201,13 +228,79 @@ async function run({ win, js, check, waitFor, clickElementAt, typeText, nav, san
   check('已登录再次点登录直接验证会话，不打开登录页或报 ERR_FAILED', await waitFor(win,
     "!document.querySelector('[data-probe=web-login]').disabled && document.querySelector('[role=status]')?.textContent.includes('网页已登录')") && signInLoads === previousSignInLoads && !challengeView() && !popup())
 
+  check('登录后在账号页也显示仪表盘子项', await waitFor(win, "document.querySelector('[data-probe=image-host]')") && !nativeView())
+  await click('[data-probe=image-host]')
+  check('账号页点击子项会创建仪表盘并跳转图床', await waitFor(win, "document.querySelector('[data-probe=dashboard-page]')") &&
+    !!(await until(() => nativeView()?.getVisible() && nativeView().webContents.getURL() === 'https://anibt.net/groups/probe-group/image-host')))
   await click('[data-probe=anibt-dashboard]')
+  await until(() => nativeView()?.webContents.getURL() === 'https://anibt.net/groups')
   check('仪表盘标题栏显示账号与刷新按钮且页面不重复显示标题', await waitFor(win,
-    `document.querySelector('[data-probe=titlebar-anibt-account]')?.textContent.includes('AniBT账号') && document.querySelector('[data-probe=titlebar-dashboard-refresh]')?.textContent.includes('刷新') && !document.querySelector('[data-probe=dashboard-page]')?.textContent.includes('字幕组仪表盘')`))
+    `document.querySelector('[data-probe=titlebar-anibt-account]')?.textContent.includes('AniBT账号') && document.querySelector('[data-probe=titlebar-dashboard-refresh]')?.textContent.trim()==='' && document.querySelector('[data-probe=titlebar-dashboard-back]')?.textContent.trim()==='' && !document.querySelector('[data-probe=dashboard-page]')?.textContent.includes('字幕组仪表盘')`))
   check('仪表盘成为主窗口子视图，不创建弹窗', !!(await until(() => nativeView()?.getVisible())) && BrowserWindow.getAllWindows().length === 1)
   let view = nativeView()
   if (!view) throw new Error('Embedded dashboard was not attached')
   check('仪表盘复用已登录会话并进入 /groups', view.webContents.getURL() === 'https://anibt.net/groups')
+  // Keep the user's clipboard intact and assert the OS content, not just a toast.
+  const savedClipboard = await Promise.all((await clipboard.read()).map(async item => new ClipboardItem(
+    Object.fromEntries(await Promise.all(item.types.map(async type => [type, await item.getType(type)])))
+  )))
+  try {
+    for (const [id, result, value] of [
+      ['copy-link', 'link', 'https://anibt.net/groups/probe-group'],
+      ['copy-markdown', 'markdown', '![图片](https://example.invalid/image.png)'],
+      ['copy-legacy', 'legacy', 'legacy-copy']
+    ]) {
+      win.focus()
+      view.webContents.focus()
+      await waitFor(view, 'document.hasFocus()')
+      await clickElementAt(view, `document.querySelector('#${id}')`)
+      check(`网页 ${id} 实际写入系统剪贴板`, await waitFor(view, `window.copyResult==='${result}'`) &&
+        !!(await until(async () => await clipboard.readText() === value)), await js(view, 'window.copyResult'))
+    }
+    const permissions = await js(view, `(async()=>{
+      const write=await navigator.permissions.query({name:'clipboard-write'});
+      let readDenied=false,writeSucceeded=false;
+      try { await navigator.clipboard.writeText('async-copy');writeSucceeded=true } catch {}
+      try { await navigator.clipboard.readText() } catch(e) { readDenied=e.name==='NotAllowedError' }
+      return {write:write.state,writeSucceeded,readDenied};
+    })()`)
+    check('网页异步复制不再被权限拦截且没有开放剪贴板读取', permissions.writeSucceeded && permissions.readDenied &&
+      await clipboard.readText() === 'async-copy', JSON.stringify(permissions))
+  } finally {
+    if (savedClipboard.length) await clipboard.write(savedClipboard)
+    else clipboard.clear()
+  }
+  check('登录后显示仪表盘四个子项', await waitFor(win, "document.querySelector('[data-probe=image-host]') && document.querySelector('[data-probe=anime_templates]') && document.querySelector('[data-probe=custom_templates]') && document.querySelector('[data-probe=sync]')"))
+  await click('[data-probe=image-host]')
+  check('仪表盘子项打开对应网页', await until(() => view.webContents.getURL() === 'https://anibt.net/groups/probe-group/image-host'))
+  await click('[data-probe=titlebar-dashboard-back]')
+  check('标题栏后退返回上一页', await until(() => view.webContents.getURL() === 'https://anibt.net/groups'))
+  await click('[data-probe=titlebar-dashboard-forward]')
+  check('标题栏前进恢复下一页', await until(() => view.webContents.getURL() === 'https://anibt.net/groups/probe-group/image-host'))
+  await click('[data-probe=anibt-dashboard]')
+  check('点击字幕组仪表盘回到 groups', await until(() => view.webContents.getURL() === 'https://anibt.net/groups'))
+  for (const [page, label, destination] of [
+    [0, '发布', 'image-host'], [1, '番剧模板', 'anime_templates'],
+    [2, '站点账号', 'custom_templates'], [4, '设置', 'sync']
+  ]) {
+    await nav(win, page)
+    if (!await waitFor(win, "!document.querySelector('[data-probe=dashboard-page]')") || !await until(() => !view.getVisible())) {
+      throw new Error(`Dashboard did not hide before navigating from ${label}`)
+    }
+    await click(`[data-probe=${destination}]`)
+    check(`${label}页点击子项会打开对应仪表盘网页并复用缓存`, await waitFor(win, "document.querySelector('[data-probe=dashboard-page]')") &&
+      !!(await until(() => nativeView() === view && view.getVisible() && view.webContents.getURL() === `https://anibt.net/groups/probe-group/${destination}`)))
+  }
+  const childLoads = groupLoads
+  await view.webContents.executeJavaScript("document.querySelector('#draft').value='cross-page-draft'")
+  await nav(win, 0)
+  await waitFor(win, "!document.querySelector('[data-probe=dashboard-page]')")
+  await until(() => !view.getVisible())
+  await js(win, "location.hash='/anibt-dashboard'")
+  check('已处理的子项导航不会在普通路由返回时重复加载', !!(await until(() => view.getVisible())) && groupLoads === childLoads &&
+    await js(view, "document.querySelector('#draft').value==='cross-page-draft'"))
+  await click('[data-probe=anibt-dashboard]')
+  await until(() => view.webContents.getURL() === 'https://anibt.net/groups')
   const beforeRefresh = groupLoads
   await click('[data-probe=titlebar-dashboard-refresh]')
   check('标题栏刷新会重新加载仪表盘网页', await until(() => groupLoads > beforeRefresh))
@@ -318,11 +411,14 @@ async function run({ win, js, check, waitFor, clickElementAt, typeText, nav, san
   check('减少动态效果时无需等待不存在的动画即可关闭', await until(() => !menu.getVisible()))
   await setMotion('no-preference')
   await click('aside > div:last-child > button')
-  check('收起侧栏后网页随内容区域缩放', !!(await until(() => nativeView()?.getBounds().x === 56)))
-  const navCount = await js(win, "document.querySelectorAll('aside nav button').length")
+  const collapsedDashboard = !!(await until(() => nativeView()?.getBounds().x === 56))
+  check('收起侧栏后网页随内容区域缩放', collapsedDashboard,
+    JSON.stringify({ bounds: nativeView()?.getBounds(), sidebar: await js(win, "({class:document.querySelector('aside').className,width:document.querySelector('aside').getBoundingClientRect().width,focus:document.hasFocus()})") }))
+  if (!collapsedDashboard) throw new Error('Sidebar did not collapse; cannot test collapsed tooltips')
+  const navCount = await js(win, "document.querySelectorAll('aside nav button:not([data-dashboard-subitem])').length")
   for (let index = 0; index < navCount; index++) {
     const selector = `aside nav button[data-overlay-probe="${index}"]`
-    await js(win, `document.querySelectorAll('aside nav button')[${index}].setAttribute('data-overlay-probe','${index}')`)
+    await js(win, `document.querySelectorAll('aside nav button:not([data-dashboard-subitem])')[${index}].setAttribute('data-overlay-probe','${index}')`)
     check(`收起侧栏第 ${index + 1} 项 Tooltip 位于实时网页之上`, await hoverSelector(selector))
     // Native visibility precedes the presentation IPC. Wait for that render, not a timer.
     check(`第 ${index + 1} 项 Tooltip 有入场动画`, await waitFor(menu, "document.querySelector('[role=tooltip]')?.dataset.phase==='open'&&getComputedStyle(document.querySelector('[role=tooltip]')).animationName==='slide-up'"))

@@ -6,7 +6,11 @@ export default {
     records: '發佈記錄',
     settings: '設定',
     anibtWebAccount: 'AniBT帳號',
-    dashboard: '字幕組儀表盤'
+    dashboard: '字幕組儀表盤',
+    dashboardImageHost: '圖床',
+    dashboardAnimeTemplates: '番組模板',
+    dashboardCustomTemplates: '自訂模板',
+    dashboardSync: '站點同步'
   },
   webAccount: {
     hint: '帳號獨立於發布組，僅用於 AniBT 網頁。點擊登入後，在下方完成「我是人類」驗證，用戶端會自動提交登入並確認工作階段。',

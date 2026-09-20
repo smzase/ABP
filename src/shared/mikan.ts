@@ -9,6 +9,12 @@ export interface MikanPublishInput {
   publishGroupId: number | null
 }
 
+/** Mikan episode IDs are the torrent's SHA-1 info hash, not the publishing group ID. */
+export function mikanEpisodeUrl(infoHashHex: string): string {
+  if (!/^[\da-f]{40}$/i.test(infoHashHex)) throw new Error('Invalid torrent info hash')
+  return `https://mikanani.me/Home/Episode/${infoHashHex.toLowerCase()}`
+}
+
 /** 把蜜柑三个公开搜索接口的 PascalCase 响应统一为渲染层模型。 */
 export function parseMikanSearchItems(kind: MikanSearchKind, value: unknown): MikanSearchItem[] {
   if (!Array.isArray(value)) return []

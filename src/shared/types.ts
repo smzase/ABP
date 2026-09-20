@@ -5,6 +5,7 @@
  */
 
 import type { DashboardMenuAction, DashboardMenuRequest, DashboardMenuSettings } from './dashboard-menu.ts'
+import type { DashboardNavigationAction, DashboardNavigationState } from './dashboard-navigation.ts'
 
 // ---------- 枚举（const 对象 + 联合类型） ----------
 
@@ -479,6 +480,8 @@ export interface IpcChannels {
   'anibt:dashboardMenuHidden': (id: string) => Promise<void>
   'anibt:dashboardMenuAction': (id: string, action: DashboardMenuAction) => Promise<void>
   'anibt:reloadDashboard': () => Promise<void>
+  'anibt:dashboardNavigationState': () => Promise<DashboardNavigationState>
+  'anibt:navigateDashboard': (action: DashboardNavigationAction) => Promise<void>
   'anibt:setWebLocale': (locale: Locale) => Promise<void>
   'anibt:setDashboardTheme': (themeMode: ThemeMode) => Promise<void>
   'anibt:closeDashboard': () => Promise<void>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref } from 'vue'
+import { onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Loader2 } from '@lucide/vue'
 import { useAppStore } from '@renderer/stores/app.ts'
@@ -14,6 +14,30 @@ const error = ref('')
 let disposed = false
 let resize: ResizeObserver | undefined
 let pageVisible = true
+let ready = false
+let navigating = false
+
+async function navigatePending(): Promise<void> {
+  if (!ready || disposed || navigating) return
+  navigating = true
+  try {
+    while (!disposed && app.pendingDashboardDestination) {
+      const destination = app.pendingDashboardDestination
+      error.value = ''
+      try {
+        await window.api.navigateAnibtDashboard(destination)
+      } catch (reason) {
+        if (disposed) return
+        if (app.pendingDashboardDestination === destination) {
+          error.value = String(reason)
+          return // Keep the destination so retrying open() can retry navigation.
+        }
+      }
+      if (!disposed && app.pendingDashboardDestination === destination) app.pendingDashboardDestination = null
+    }
+  } finally { navigating = false }
+}
+watch(() => app.pendingDashboardDestination, () => { void navigatePending() })
 
 function bounds(): { x: number; y: number; width: number; height: number } {
   const rect = host.value!.getBoundingClientRect()
@@ -30,8 +54,15 @@ async function open(): Promise<void> {
   if (disposed || !host.value) return
   loading.value = true
   error.value = ''
+  ready = false
   try {
     await window.api.openAnibtDashboard(bounds(), app.data.settings.appearance.mode)
+    if (!disposed) {
+      ready = true
+      // The native view may not exist yet when the sidebar changes routes.
+      // Drain only after open resolves; subsequent clicks use the same path.
+      await navigatePending()
+    }
     if (!disposed) {
       syncBounds()
       setVisible()
@@ -49,6 +80,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   dashboardActive.value = false
   disposed = true
+  ready = false
+  app.pendingDashboardDestination = null
   resize?.disconnect()
   pageVisible = false
   setVisible()

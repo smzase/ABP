@@ -5,6 +5,7 @@ import { applyProxyToSession, getProxy } from './proxy.ts'
 import type { ConfigStore } from './store.ts'
 import { DashboardMenuHost } from './dashboard-menu.ts'
 import type { DashboardMenuAction, DashboardMenuRequest, DashboardMenuSettings } from '../shared/dashboard-menu.ts'
+import { dashboardDestinationUrl, dashboardLocation, type DashboardNavigationAction, type DashboardNavigationState } from '../shared/dashboard-navigation.ts'
 
 const PARTITION = 'persist:abp-anibt-web'
 const DASHBOARD_CACHE_MS = 15 * 60 * 1000
@@ -22,6 +23,104 @@ let dashboardHideTimer: ReturnType<typeof setTimeout> | undefined
 let dashboardPageVisible = false
 let dashboardMenu: DashboardMenuHost | null = null
 let localeUpdate: Promise<void> = Promise.resolve()
+let navigationClient: WebContents | undefined
+let webLoggedIn = false
+let groupSlug = ''
+let identityGeneration = 0
+
+export function subscribeDashboardNavigation(sender: WebContents): void {
+  navigationClient = sender
+}
+
+export function getDashboardNavigationState(): DashboardNavigationState {
+  const wc = dashboard?.view.webContents
+  const history = wc && !wc.isDestroyed() ? wc.navigationHistory : undefined
+  const location = wc && !wc.isDestroyed() ? dashboardLocation(wc.getURL()) : { groupSlug, section: null }
+  return {
+    canGoBack: history?.canGoBack() ?? false,
+    canGoForward: history?.canGoForward() ?? false,
+    loggedIn: webLoggedIn,
+    groupSlug: location.groupSlug || groupSlug,
+    section: location.section
+  }
+}
+
+function sendNavigationState(): void {
+  if (navigationClient && !navigationClient.isDestroyed()) {
+    navigationClient.send('anibt:dashboardNavigationStateChanged', getDashboardNavigationState())
+  }
+}
+
+async function discoverDashboardGroup(): Promise<void> {
+  const wc = dashboard?.view.webContents
+  if (!wc || wc.isDestroyed() || !webLoggedIn || groupSlug) return
+  try {
+    const hrefs = await wc.executeJavaScript(`Array.from(document.querySelectorAll('a[href]')).map(a => a.getAttribute('href')).filter(Boolean)`)
+    const slugs = new Set((Array.isArray(hrefs) ? hrefs : []).map(value => {
+      try { return dashboardLocation(new URL(String(value), ANIBT_WEB_ORIGIN).href).groupSlug } catch { return '' }
+    }).filter(Boolean))
+    if (slugs.size === 1) {
+      groupSlug = [...slugs][0]
+      sendNavigationState()
+    }
+  } catch { /* The document may be navigating or not expose links yet. */ }
+}
+function updateDashboardLocation(): void {
+  const wc = dashboard?.view.webContents
+  if (!wc || wc.isDestroyed()) return
+  const url = wc.getURL()
+  const location = dashboardLocation(url)
+  if (webLoggedIn && location.groupSlug) groupSlug = location.groupSlug
+  if (isAnibtWebUrl(url) && new URL(url).pathname.startsWith('/auth/')) {
+    webLoggedIn = false
+    groupSlug = ''
+  }
+  sendNavigationState()
+  void discoverDashboardGroup()
+}
+
+/** Prefer an actual group slug from AniBT's own page or redirect; never infer it from an email. */
+async function discoverGroup(ses: Session, request: number): Promise<void> {
+  if (groupSlug || !webLoggedIn) return
+  try {
+    const response = await ses.fetch(`${ANIBT_WEB_ORIGIN}/groups`, {
+      credentials: 'include', signal: AbortSignal.timeout(15000)
+    })
+    if (!response.ok) return
+    let slug = dashboardLocation(response.url).groupSlug
+    if (!slug) {
+      const html = await response.text()
+      const slugs = new Set([...html.matchAll(/href=["']([^"']+)["']/g)]
+        .map(match => {
+          try { return dashboardLocation(new URL(match[1], ANIBT_WEB_ORIGIN).href).groupSlug } catch { return '' }
+        })
+        .filter(Boolean))
+      if (slugs.size === 1) slug = [...slugs][0]
+    }
+    if (request === identityGeneration && webLoggedIn && !groupSlug && slug) {
+      groupSlug = slug
+      sendNavigationState()
+    }
+  } catch { /* The dashboard can still provide the selected group after navigation. */ }
+}
+
+export async function navigateAnibtDashboard(action: DashboardNavigationAction): Promise<void> {
+  const current = dashboard
+  if (!current || current.view.webContents.isDestroyed()) return
+  await current.load
+  if (dashboard !== current) return
+  const wc = current.view.webContents
+  if (action === 'back' || action === 'forward') {
+    const history = wc.navigationHistory
+    if (action === 'back' && history.canGoBack()) history.goBack()
+    if (action === 'forward' && history.canGoForward()) history.goForward()
+  } else {
+    if (action !== 'home' && !webLoggedIn) throw new Error('AniBT web login required')
+    const url = dashboardDestinationUrl(action, groupSlug)
+    if (wc.getURL() !== url) await wc.loadURL(url)
+  }
+  updateDashboardLocation()
+}
 
 export function initAnibtWeb(config: ConfigStore): void {
   store = config
@@ -87,8 +186,15 @@ async function webSession(): Promise<Session> {
     await setWebLocaleCookie(ses, webLocale)
     const proxy = getProxy()
     if (proxy) await applyProxyToSession(ses, proxy)
-    ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
-    ses.setPermissionCheckHandler(() => false)
+    // Copy buttons use the browser clipboard API. Grant only writing, only to
+    // AniBT's top-level page; embedded frames and clipboard reads stay denied.
+    ses.setPermissionRequestHandler((wc, permission, callback, details) => {
+      callback(permission === 'clipboard-sanitized-write' && details.isMainFrame &&
+        isAnibtWebUrl(details.requestingUrl) && !wc.isDestroyed() && isAnibtWebUrl(wc.getURL()))
+    })
+    ses.setPermissionCheckHandler((wc, permission, requestingOrigin, details) =>
+      permission === 'clipboard-sanitized-write' && details.isMainFrame &&
+      isAnibtWebUrl(requestingOrigin) && !!wc && !wc.isDestroyed() && isAnibtWebUrl(wc.getURL()))
     let timer: ReturnType<typeof setTimeout> | undefined
     ses.cookies.on('changed', () => {
       if (timer) clearTimeout(timer)
@@ -165,6 +271,7 @@ function securePage(wc: WebContents): void {
 }
 
 export async function checkAnibtWebLogin(): Promise<SiteLoginResult> {
+  const request = ++identityGeneration
   const ses = await webSession()
   let ok = false
   let message = '尚未登录。请点击登录，并在账号页完成“我是人类”验证。'
@@ -179,6 +286,12 @@ export async function checkAnibtWebLogin(): Promise<SiteLoginResult> {
     if (ok) message = 'AniBT 网页已登录'
   } catch (error) {
     message = `无法确认 AniBT 登录状态，请重试：${String(error)}`
+  }
+  if (request === identityGeneration) {
+    webLoggedIn = ok
+    if (!ok) groupSlug = ''
+    sendNavigationState()
+    if (ok) void discoverGroup(ses, request)
   }
   await persistCookies(ses)
   return { ok, message, cookies: await cookies(ses), userAgent: ses.getUserAgent() }
@@ -310,6 +423,7 @@ export function closeAnibtDashboard(): void {
   dashboardPageVisible = false
   const old = dashboard
   dashboard = null
+  sendNavigationState()
   if (!old) return
   old.parent.removeListener('closed', old.closed)
   if (!old.parent.isDestroyed()) old.parent.contentView.removeChildView(old.view)
@@ -380,8 +494,13 @@ export async function openAnibtDashboard(parent: BrowserWindow, bounds: Dashboar
     dashboardPageVisible = true
     dashboard.view.setBackgroundColor(mode === 'dark' ? '#17101a' : '#fffbfc')
     updateAnibtDashboardBounds(bounds)
+    // Leaving the dashboard disposes its overlay host, while the remote page
+    // itself remains cached. Recreate the host when that cached page is shown.
+    dashboardMenu ??= new DashboardMenuHost(parent, dashboard.view.webContents)
     await dashboard.load
     await applyTheme(dashboard.view.webContents)
+    void discoverDashboardGroup()
+    sendNavigationState()
     dashboard.view.setVisible(dashboardPageVisible)
     return
   }
@@ -406,9 +525,14 @@ export async function openAnibtDashboard(parent: BrowserWindow, bounds: Dashboar
   dashboardMenu = new DashboardMenuHost(parent, view.webContents)
   updateAnibtDashboardBounds(bounds)
   securePage(view.webContents)
+  view.webContents.on('did-navigate', updateDashboardLocation)
+  view.webContents.on('did-navigate-in-page', updateDashboardLocation)
+  view.webContents.on('did-stop-loading', () => { updateDashboardLocation(); void discoverDashboardGroup() })
   try {
     await view.webContents.loadURL(`${ANIBT_WEB_ORIGIN}/groups`)
     await applyTheme(view.webContents)
+    void discoverDashboardGroup()
+    sendNavigationState()
     resolveLoad()
   } catch (error) {
     rejectLoad(error)
@@ -432,5 +556,9 @@ export async function logoutAnibtWeb(clearAll: boolean): Promise<void> {
   }
   await ses.clearStorageData({ storages: clearAll ? ['cookies', 'localstorage', 'indexdb', 'serviceworkers', 'cachestorage'] : ['cookies'] })
   if (clearAll) await ses.clearCache()
+  identityGeneration++
+  webLoggedIn = false
+  groupSlug = ''
+  sendNavigationState()
   await persistCookies(ses)
 }

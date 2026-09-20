@@ -4,6 +4,7 @@
  * 运行：node scripts/run-checks.mjs
  */
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -43,9 +44,12 @@ import { sealSecrets, openSecrets, collectSecrets, mergeSecrets, redactSecrets }
 import { formatDescription, markdownToBbcode, markdownToHtml } from '../src/shared/description-format.ts'
 import {
   buildMikanRequestBody,
+  mikanEpisodeUrl,
   parseMikanSearchItems,
   selectMikanBangumiMatch
 } from '../src/shared/mikan.ts'
+import { dmhyCookieHeader, extractDmhyTopicLink, parseDmhyIdentities, selectDmhyIdentity } from '../src/shared/dmhy.ts'
+import { loadDmhyPublishContext } from '../src/main/dmhy.ts'
 import { PUBLISH_SITES } from '../src/shared/types.ts'
 import { isAnibtWebUrl, hasAnibtWebSession } from '../src/shared/anibt-web.ts'
 import {
@@ -862,7 +866,111 @@ ok('更新预设只补新词，不覆盖同名用户规则或其他自定义词'
   assert.equal(updateSubtitlePresets(result.rules, result.presetVersion).added, 0)
 })
 
+console.log('DMHY publishing identities:')
+const dmhyForm = `<select name="sort_id"><option value="2" label="动画">动画</option></select>
+  <select id='team_id' name = 'team_id'>
+    <option value='0' label='个人发布'>个人发布</option>
+    <option selected value = '23' label=' 测试 &amp; 发布组 '>ignored</option>
+    <option value=42>&#x793a;&#20363;字幕组</option>
+    <option value=99 disabled>不可用</option>
+  </select>`
+ok('DMHY 仅解析 team_id，支持 label/文本/实体/属性空格，保留个人身份 0', () => {
+  const identities = parseDmhyIdentities(dmhyForm)
+  assert.deepEqual(identities, [
+    { id: '0', name: '个人发布', selected: false },
+    { id: '23', name: '测试 & 发布组', selected: true },
+    { id: '42', name: '示例字幕组', selected: false }
+  ])
+  assert.equal(selectDmhyIdentity(identities, ' 测试　& 发布组 ')?.id, '23')
+  assert.equal(selectDmhyIdentity(identities, '示例字幕组')?.id, '42')
+  assert.equal(selectDmhyIdentity(identities, '个人发布')?.id, '0')
+  assert.equal(selectDmhyIdentity(identities, '  ')?.id, '23')
+  assert.equal(selectDmhyIdentity(identities, '动画'), undefined)
+  assert.equal(selectDmhyIdentity(identities, '错误名字'), undefined)
+})
+ok('DMHY 畸形/截断 HTML 不误选；忽略注释脚本和 textarea，兼容省略 option 结束标签', () => {
+  for (const html of ['', '\u0000\ufffdgarbage', '<select name=team_id><option value="23', '<select name=team_id disabled><option value=1>组</option></select>']) {
+    assert.deepEqual(parseDmhyIdentities(html), [])
+  }
+  const fake = '<select name=team_id><option value=999>错误组</option></select>'
+  assert.deepEqual(parseDmhyIdentities(`<!--${fake}--><script>${fake}</script><textarea>${fake}</textarea>${dmhyForm}`), parseDmhyIdentities(dmhyForm))
+  assert.deepEqual(parseDmhyIdentities('<SELECT NAME=team_id><OPTION VALUE=1>A<OPTION VALUE=2>B</SELECT>'), [
+    { id: '1', name: 'A', selected: false }, { id: '2', name: 'B', selected: false }
+  ])
+  assert.doesNotThrow(() => parseDmhyIdentities('<select name=team_id><option value=1>&#x110000; &#99999999999;</option></select>'))
+  const entities = parseDmhyIdentities('<select name=team_id><option value="3" label="A &gt; B &quot;C&quot; &amp;amp;">x</option></select>')
+  assert.equal(entities[0].name, 'A > B "C" &amp;')
+})
+ok('DMHY 检查按 Cookie 主机/路径/有效期筛选，不把 www 会话伪装成 share 会话', () => {
+  const cookie = { name: 'session', value: 'fixture', domain: 'www.dmhy.org', path: '/', secure: true, httpOnly: true }
+  const cookies = [cookie,
+    { ...cookie, name: 'common', domain: '.dmhy.org' },
+    { ...cookie, name: 'expired', expirationDate: 50 },
+    { ...cookie, name: 'otherPath', path: '/user' },
+    { ...cookie, name: 'wrong', domain: 'dmhy.org.invalid' }
+  ]
+  assert.equal(dmhyCookieHeader(cookies, 'https://www.dmhy.org/topics/add', 100), 'session=fixture; common=fixture')
+  assert.equal(dmhyCookieHeader(cookies, 'https://share.dmhy.org/topics/add', 100), 'common=fixture')
+  assert.equal(dmhyCookieHeader(cookies, 'https://outside.invalid/topics/add', 100), '')
+})
+ok('DMHY 发布记录兼容响应页/列表页链接格式和 HTML 实体', () => {
+  const title = '[测试组] 我们的雨色协议 - 01 [1080p]'
+  const html = `<a href="/topics/view/123_test.html" target="_blank"><span>${title.replace(/ /g, '&nbsp;')}</span></a>
+    <a target='_blank' href='/topics/edit/id/999'>其他内容</a>`
+  assert.equal(extractDmhyTopicLink(html, title, 'https://www.dmhy.org'), 'https://www.dmhy.org/topics/view/123_test.html')
+  assert.equal(extractDmhyTopicLink(`<a href='/topics/view/123_test.html'>${title}</a>`, title, 'https://share.dmhy.org'), 'https://share.dmhy.org/topics/view/123_test.html')
+  assert.equal(extractDmhyTopicLink('<a href="/topics/view/123_test.html">完全不同</a>', title, 'https://www.dmhy.org'), undefined)
+})
+{
+  const visited = []
+  const result = await loadDmhyPublishContext(async url => {
+    visited.push(url)
+    return new Response(dmhyForm)
+  }, '示例字幕组')
+  ok('DMHY 发布/检查优先使用与账号登录相同的 www 主机', () => {
+    assert.deepEqual(visited, ['https://www.dmhy.org/topics/add'])
+    assert.deepEqual(result, { ok: true, url: visited[0], teamId: '42', identityName: '示例字幕组' })
+  })
+}
+{
+  const visited = []
+  const result = await loadDmhyPublishContext(async url => {
+    visited.push(url)
+    return new Response(url.includes('www.') ? '登入發佈系統' : dmhyForm)
+  }, '示例字幕组')
+  ok('DMHY 兼容旧 share 会话且后续提交仍使用成功读取身份的主机', () => {
+    assert.equal(visited.length, 2)
+    assert.equal(result.ok, true)
+    assert.equal(result.url, 'https://share.dmhy.org/topics/add')
+    assert.equal(result.teamId, '42')
+  })
+}
+{
+  const wrongName = await loadDmhyPublishContext(async () => new Response(dmhyForm), '不存在')
+  const login = await loadDmhyPublishContext(async () => new Response('登入發佈系統'), '示例字幕组')
+  const challenge = await loadDmhyPublishContext(async () => new Response('<title>Just a moment...</title>', { status: 403 }), '')
+  const empty = await loadDmhyPublishContext(async () => new Response('<h1>Unrecognized page</h1>'), '')
+  ok('DMHY 分别报告身份不匹配、登录失效、人机验证和缺失表单，不能假通过', () => {
+    for (const result of [wrongName, login, challenge, empty]) assert.equal(result.ok, false)
+    assert.match(wrongName.error, /当前账号可用身份.*示例字幕组/)
+    assert.match(login.error, /登录已失效/)
+    assert.match(challenge.error, /需要网页验证/)
+    assert.match(empty.error, /发布权限/)
+  })
+}
+
 console.log('mikan search matching:')
+ok('Mikan 作品链接使用 info hash；不使用发布组主页，支持大写 hash 并拒绝畸形值', () => {
+  const hash = 'cc93508d7cae1b5227126cb6954929d856a6b43e'
+  assert.equal(mikanEpisodeUrl(hash.toUpperCase()), `https://mikanani.me/Home/Episode/${hash}`)
+  for (const invalid of ['', '984', 'a'.repeat(39), 'x'.repeat(40), '../group']) assert.throws(() => mikanEpisodeUrl(invalid))
+  // Hash the exact info bytes, not the full torrent or a re-encoded/sorted dictionary.
+  const rawInfo = 'd4:name4:Test6:lengthi1ee'
+  const bytes = Buffer.from(`d4:info${rawInfo}e`)
+  const expected = createHash('sha1').update(rawInfo).digest('hex')
+  const hashFromUpload = createHash('sha1').update(parseTorrent(bytes).infoRaw).digest('hex')
+  assert.equal(mikanEpisodeUrl(hashFromUpload), `https://mikanani.me/Home/Episode/${expected}`)
+})
 ok('Mikan 番剧搜索响应提取自有 ID、标题和 bgm.tv subject id', () => {
   assert.deepEqual(parseMikanSearchItems('bangumi', [{
     BangumiId: 3169,

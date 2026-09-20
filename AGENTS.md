@@ -35,6 +35,8 @@ scripts/      # run-checks.mjs (pure-logic unit tests), ui-probe.cjs (live-windo
 
 ## Hard rules
 
+0. **README edit scope**: `README.md` is user-maintained documentation. Without the user's explicit permission, do not modify, delete, or reorder any part of it. The only exception is the content under `## 验证与打包` and before the next heading of the same level. Ask for explicit permission before changing any other part of `README.md`.
+
 1. **Contract-driven IPC**: channel signatures live in `IpcChannels` in `src/shared/types.ts`.
    Adding a channel takes three steps: (1) write the signature in types.ts,
    (2) add the handler in `main/ipc.ts`, (3) expose one more method in `preload/index.ts`.
@@ -236,6 +238,12 @@ users see in published titles.
   API Token. ACG.RIP uses API URL + `X-API-TOKEN`: accept either the bare token or the
   `tpx://acg.rip/<token>` form, but always strip the scheme before sending the header.
   Do not add VCB-Studio as a publishing site.
+- DMHY identity lookup and upload must share the authenticated host: try `www.dmhy.org`
+  (the credential-login host) first, with `share.dmhy.org` for older manual sessions.
+  Parse only the `team_id` select, accepting option labels/text and HTML entities; keep
+  personal identity `0`. Never substitute a different identity for a configured name.
+  Account checks use the same lookup and Cookie scope rules and distinguish login/challenge
+  failures from a name mismatch. Do not forward host-only Cookies between mirrors.
 - Cookie login windows use a persistent partition derived from the account group id and
   inherit the configured proxy. CAPTCHA and Cloudflare challenges are completed by the
   user in that real page. Cookies, usernames/passwords, API keys/tokens and User-Agent
@@ -258,7 +266,13 @@ users see in published titles.
   probe `/groups` (Electron throws `Redirect was cancelled`). Logout uses Better Auth's
   `/api/auth/sign-out`; clear-cookie also clears this partition's storage/cache.
 - The dashboard is a sandboxed WebContentsView inside the main content area, without
-  Node or preload. The title bar owns the `AniBT账号` and `刷新` actions; the page itself
+  Node or preload. Its AniBT top-level page may request `clipboard-sanitized-write`
+  in both session permission handlers; all other origins, frames and permissions stay
+  denied. Copy regression checks use real clicks and verify OS clipboard contents.
+  Sidebar children queue their destination in the transient app store, switch to the
+  dashboard route, then navigate after the native view is ready. Consume/cancel the
+  request so ordinary cache restoration never replays an old child navigation.
+  The title bar owns back, forward and refresh icon buttons followed by `AniBT账号`; the page itself
   has no duplicate dashboard heading. Resize it with the route host, hide it when leaving
   the route, and keep the loaded view cached for 15 minutes before destroying it (switching
   to local mode, logout, or app close destroys it immediately). Dashboard sidebar popovers
@@ -290,6 +304,9 @@ users see in published titles.
   `bangumiId` together with `subtitleGroupId`; `publishGroupId` remains independent.
   **ABP deliberately never sends Mikan's optional `trackers` field.** Keep this rule
   in `shared/mikan.ts` and its unit test even though the upstream document lists it.
+  Successful local records link to `/Home/Episode/<SHA-1 info hash>` computed from the
+  uploaded raw info dictionary (also on retries); an empty 200 response must never send
+  the user to a publish-group page instead of the episode.
 - Mikan anime search uses `/api/bangumi/search/<keyword>`. Automatic filling after a
   Bangumi search must match the returned `BangumiUrl` subject id (or an exact normalized
   title for older responses); never take the first fuzzy result blindly.

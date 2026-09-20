@@ -1,5 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import { net, session, type Session } from 'electron'
 import { getConfigDir } from './paths.ts'
 import { addTorrent, getTorrent, removeTorrent, type PoolEntry } from './torrents.ts'
@@ -20,7 +21,9 @@ import type {
 } from '../shared/types.ts'
 import * as anibt from './anibt.ts'
 import { applyProxyToSession, getProxy } from './proxy.ts'
-import { buildMikanRequestBody, parseMikanSearchItems } from '../shared/mikan.ts'
+import { buildMikanRequestBody, mikanEpisodeUrl, parseMikanSearchItems } from '../shared/mikan.ts'
+import { dmhyCookieHeader, extractDmhyTopicLink } from '../shared/dmhy.ts'
+import { loadDmhyPublishContext } from './dmhy.ts'
 import { parseTorrent } from '../shared/bencode.ts'
 import {
   acgripPostAsTeamValue,
@@ -36,7 +39,6 @@ const LOGIN_URLS: Partial<Record<PublishSite, string>> = {
 }
 
 const SITE_TEST_URLS: Partial<Record<PublishSite, string>> = {
-  dmhy: 'https://share.dmhy.org/topics/add',
   bangumiMoe: 'https://bangumi.moe/api/team/myteam'
 }
 
@@ -135,6 +137,8 @@ async function publishMikan(
   payload: LocalPublishPayload,
   torrent: PoolEntry
 ): Promise<SitePublishResult> {
+  // Compute from the raw uploaded info dictionary, including retries restored without meta.
+  const url = mikanEpisodeUrl(createHash('sha1').update(parseTorrent(torrent.bytes).infoRaw).digest('hex'))
   const body = buildMikanRequestBody({
     title: payload.title,
     torrentBase64: Buffer.from(torrent.bytes).toString('base64'),
@@ -149,13 +153,6 @@ async function publishMikan(
     body: JSON.stringify(body)
   })
   if (!response.ok) return { site: 'mikan', ok: false, error: await errorText(response), httpStatus: response.status }
-  let url = account.publishGroupId ? `https://mikanani.me/Home/PublishGroup/${account.publishGroupId}` : 'https://mikanani.me'
-  try {
-    const json = (await response.clone().json()) as Record<string, unknown>
-    if (typeof json.url === 'string') url = json.url
-  } catch {
-    // The documented success response is only HTTP 200 and may have no body.
-  }
   return { site: 'mikan', ok: true, url }
 }
 
@@ -211,26 +208,18 @@ async function publishNyaa(
   }
 }
 
-export function findDmhyTeam(html: string, expected: string): string {
-  const options = [...html.matchAll(/<option\b([^>]*)>/gi)].flatMap((match) => {
-    const attributes = match[1]
-    const value = attributes.match(/\bvalue=["'](\d+)["']/i)?.[1]
-    const label = attributes.match(/\blabel=["']([^"']+)["']/i)?.[1]
-    return value && label ? [{ value, label: label.trim() }] : []
-  })
-  const match = expected
-    ? options.find((item) => item.label.localeCompare(expected.trim(), undefined, { sensitivity: 'accent' }) === 0)
-    : options[0]
-  return match?.value ?? ''
-}
-
-async function findDmhyLink(ses: Session, title: string): Promise<string | undefined> {
-  const url = `https://share.dmhy.org/topics/list?keyword=${encodeURIComponent(title)}`
+async function findDmhyLink(ses: Session, title: string, origin: string, userAgent: string): Promise<string | undefined> {
+  const urls = [
+    `${origin}/topics/mlist/scope/team`,
+    `${origin}/topics/list?keyword=${encodeURIComponent(title)}`
+  ]
   for (let attempt = 0; attempt < 5; attempt++) {
-    const response = await ses.fetch(url)
-    const html = await response.text()
-    const match = html.match(/href="(\/topics\/view\/\d+_[^"]+\.html)"/)
-    if (match) return new URL(match[1], 'https://share.dmhy.org').toString()
+    for (const url of urls) {
+      const response = await ses.fetch(url, { headers: { 'User-Agent': userAgent } })
+      const html = await response.text()
+      const link = extractDmhyTopicLink(html, title, origin)
+      if (link) return link
+    }
     if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 1000))
   }
   return undefined
@@ -243,15 +232,14 @@ async function publishDmhy(
   torrent: PoolEntry
 ): Promise<SitePublishResult> {
   const ses = await accountSession(groupId, account)
-  const addPage = await ses.fetch('https://share.dmhy.org/topics/add', { headers: { 'User-Agent': account.userAgent || DEFAULT_UA } })
-  const page = await addPage.text()
-  const teamId = findDmhyTeam(page, account.identityName)
-  if (!teamId) return { site: 'dmhy', ok: false, error: '未找到动漫花园发布身份，请检查 Cookie 和发布身份名称' }
+  const userAgent = account.userAgent || DEFAULT_UA
+  const context = await loadDmhyPublishContext((url) => ses.fetch(url, { headers: { 'User-Agent': userAgent } }), account.identityName)
+  if (!context.ok) return { site: 'dmhy', ok: false, error: context.error }
   const html = formatDescription('dmhy', payload.descriptionMd)
   const poster = html.match(/<img[^>]+src="([^"]+)"/i)?.[1] ?? ''
   const form = new FormData()
   form.append('sort_id', '2')
-  form.append('team_id', teamId)
+  form.append('team_id', context.teamId)
   form.append('bt_data_title', payload.title)
   form.append('poster_url', poster)
   form.append('bt_data_intro', html)
@@ -262,10 +250,17 @@ async function publishDmhy(
   form.append('emule_resource', '')
   form.append('synckey', '')
   form.append('submit', '提交')
-  const response = await ses.fetch('https://share.dmhy.org/topics/add', { method: 'POST', body: form })
+  const response = await ses.fetch(context.url, {
+    method: 'POST', body: form, headers: { 'User-Agent': userAgent, Referer: context.url }
+  })
   const raw = await response.text()
-  if (raw.includes('上傳成功') || raw.includes('種子已存在')) {
-    return { site: 'dmhy', ok: true, url: await findDmhyLink(ses, payload.title) }
+  if (response.ok && (raw.includes('上傳成功') || raw.includes('種子已存在'))) {
+    const origin = new URL(context.url).origin
+    return {
+      site: 'dmhy',
+      ok: true,
+      url: extractDmhyTopicLink(raw, payload.title, origin) ?? await findDmhyLink(ses, payload.title, origin, userAgent)
+    }
   }
   return { site: 'dmhy', ok: false, error: raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 500), httpStatus: response.status }
 }
@@ -483,6 +478,14 @@ export async function checkSite(site: PublishSite, account: SiteAccountConfig): 
     }
     if (site === 'mikan' || site === 'acgrip' || site === 'acgnxAsia' || site === 'acgnxGlobal') {
       return unavailableCredentialCheck(site)
+    }
+    if (site === 'dmhy') {
+      const context = await loadDmhyPublishContext((url) => net.fetch(url, {
+        headers: { 'User-Agent': account.userAgent || DEFAULT_UA, Cookie: dmhyCookieHeader(account.cookies, url) }
+      }), account.identityName)
+      return context.ok
+        ? { ok: true, message: `检查通过：${context.identityName}` }
+        : { ok: false, message: context.error }
     }
     const testUrl = SITE_TEST_URLS[site]
     if (!testUrl) return { ok: false, message: '该站点没有可用的检查接口' }

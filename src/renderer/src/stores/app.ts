@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import type { AppData, DashboardBounds, SiteLoginResult } from '@shared/types.ts'
+import type { DashboardDestination, DashboardNavigationState } from '@shared/dashboard-navigation.ts'
 import { defaultAppData } from '@shared/store-doc.ts'
 import { toPlain } from '@shared/plain.ts'
 import { ACCENT_PRESETS, DEFAULT_ACCENT } from '@shared/constants.ts'
@@ -17,6 +18,21 @@ export const useAppStore = defineStore('app', () => {
   const loaded = ref(false)
   const webBusy = ref(false)
   const webResult = ref<{ ok: boolean; message: string } | null>(null)
+  const webLoggedIn = ref(false)
+  const dashboardGroupSlug = ref('')
+  const dashboardPath = ref('/groups')
+  const dashboardCanGoBack = ref(false)
+  const dashboardCanGoForward = ref(false)
+  // A sidebar destination survives the route change, but is never saved to config.
+  const pendingDashboardDestination = ref<DashboardDestination | null>(null)
+
+  window.api.onDashboardNavigationState((state: DashboardNavigationState) => {
+    webLoggedIn.value = state.loggedIn
+    dashboardCanGoBack.value = state.canGoBack
+    dashboardCanGoForward.value = state.canGoForward
+    if (state.groupSlug) dashboardGroupSlug.value = state.groupSlug
+    dashboardPath.value = state.section ? `/groups/${state.groupSlug}/${state.section}` : state.groupSlug ? `/groups/${state.groupSlug}` : '/groups'
+  })
 
   initDashboardMenus(action => {
     if (action.type === 'theme') setThemeMode(action.value)
@@ -33,6 +49,17 @@ export const useAppStore = defineStore('app', () => {
     applyAppearance()
     applyLocale()
     void window.api.setAnibtWebLocale(data.value.settings.locale)
+    void window.api.checkAnibtWeb().then(result => {
+      webLoggedIn.value = result.ok
+      data.value.anibtWebAccount.cookies = result.cookies
+      data.value.anibtWebAccount.userAgent = result.userAgent
+    }).catch(() => undefined)
+    void window.api.getDashboardNavigationState().then(state => {
+      webLoggedIn.value = state.loggedIn
+      dashboardCanGoBack.value = state.canGoBack
+      dashboardCanGoForward.value = state.canGoForward
+      if (state.groupSlug) dashboardGroupSlug.value = state.groupSlug
+    }).catch(() => undefined)
   }
 
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -85,10 +112,15 @@ export const useAppStore = defineStore('app', () => {
           : await window.api.checkAnibtWeb()
         data.value.anibtWebAccount.cookies = result.cookies
         data.value.anibtWebAccount.userAgent = result.userAgent
+        webLoggedIn.value = result.ok
         webResult.value = { ok: result.ok, message: result.message ?? '' }
       } else {
         await window.api.logoutAnibtWeb(action === 'clear')
         data.value.anibtWebAccount.cookies = []
+        webLoggedIn.value = false
+        dashboardGroupSlug.value = ''
+        dashboardPath.value = '/groups'
+        pendingDashboardDestination.value = null
         webResult.value = { ok: true, message: i18n.global.t(action === 'clear' ? 'webAccount.cleared' : 'webAccount.loggedOut') }
       }
     } catch (error) {
@@ -117,6 +149,12 @@ export const useAppStore = defineStore('app', () => {
     loaded,
     webBusy,
     webResult,
+    webLoggedIn,
+    dashboardGroupSlug,
+    dashboardPath,
+    dashboardCanGoBack,
+    dashboardCanGoForward,
+    pendingDashboardDestination,
     webAction,
     load,
     applyAppearance,

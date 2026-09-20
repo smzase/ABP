@@ -47,6 +47,7 @@ $env:ELECTRON_RUN_AS_NODE=$null; $env:NODE_OPTIONS=""
 
 ## 红线
 
+- `README.md` 由用户自行维护。没有用户明确允许时，禁止修改、删除或重排 README 的任何内容；唯一允许修改的是 `## 验证与打包` 标题下直到下一个同级标题前的内容。需要改动其他部分时，必须先获得用户明确许可。
 - API Key、API Token、账号密码、Cookie、User-Agent 只存本地 `secrets.json`（加密），
   不进 `config.json`、不进仓库、不进日志
 - `dependencies` 保持为空（全部 bundle，asar 无 node_modules）
@@ -73,6 +74,10 @@ $env:ELECTRON_RUN_AS_NODE=$null; $env:NODE_OPTIONS=""
   “打开网页登录”才创建独立窗口；萌番组调用 signin API）；
   末日动漫/AcgnX 用 UID + API Token；ACG.RIP 用 API URL + `X-API-TOKEN`，输入既支持
   裸 Token 也支持 `tpx://acg.rip/<token>`，请求前必须剥离前缀。
+- 动漫花园发布身份查询与提交使用同一已登录主机：优先 `www.dmhy.org`，兼容旧手动登录的
+  `share.dmhy.org`。只解析 `team_id` 下拉框，兼容 label、选项文本与 HTML 实体，保留个人身份 `0`；
+  不得为指定名称擅自替换身份。检查与发布共用此逻辑，区分登录失效、网页验证和身份不匹配，
+  不跨主机转发 host-only Cookie。
 - AniBT 模式侧栏在仪表盘上方单列“AniBT账号”，不再放在站点账号内，也不依赖发布组。
   `AppData.anibtWebAccount` 的凭据和 Cookie 均存入加密 secrets.json，旧组内网页账号迁移一次。
   `main/anibt-web.ts` 管理独立 `persist:abp-anibt-web` 会话：先检查真实会话，已登录直接返回，
@@ -83,8 +88,12 @@ $env:ELECTRON_RUN_AS_NODE=$null; $env:NODE_OPTIONS=""
   取消或离开账号页立即销毁验证视图；验证码 Cookie 不能当作登录凭证。禁止用
   `redirect:manual` 检查 `/groups`（Electron 会报 Redirect was cancelled）。
   退出调用 `/api/auth/sign-out`，清 Cookie 额外清除此会话的存储和缓存。
-- 仪表盘用无 Node/preload 的 WebContentsView 内嵌在主窗口内容区；标题栏右侧显示
-  “AniBT账号”和“刷新”，页面内不重复显示标题。尺寸跟随页面，离开路由只隐藏并
+- 仪表盘用无 Node/preload 的 WebContentsView 内嵌在主窗口内容区。
+  剪贴板仅允许 AniBT 顶层页面的 clipboard-sanitized-write，权限检查和请求均须校验来源与
+  主框架；读取、子框架和其他权限继续拒绝。离线探针真实点击复制并核对系统剪贴板内容。
+  侧栏子项先把目标暂存 app store，再进入仪表盘路由，等原生视图就绪后执行并消费请求；
+  离开页面取消未处理请求，普通缓存恢复不得重放旧跳转。标题栏右侧依次显示后退、前进、
+  刷新图标和“AniBT账号”，页面内不重复显示标题。尺寸跟随页面，离开路由只隐藏并
   缓存 15 分钟，切到本地模式、退出账号或关闭应用时销毁。仪表盘侧栏浮窗和 Tooltip 使用
   `main/dashboard-menu.ts` 的独立本地 WebContentsView，先定位、置顶，再显示第一帧。
   不准再截图/隐藏网页来让浮窗置顶，这会冻结画面；CSS z-index 也无法盖过原生视图。
@@ -105,6 +114,8 @@ $env:ELECTRON_RUN_AS_NODE=$null; $env:NODE_OPTIONS=""
   蜜柑转 BBCode；ACG.RIP 用 `[markdown]` 与 `[/markdown]` 包裹。
 - 蜜柑的 `bangumiId` 不是 bgm.tv 的 `bgmId`；与 `subtitleGroupId` 成对发送。
   **无视蜜柑文档的可选 `trackers`：请求体永远不发送该字段。**
+  发布成功的记录链接由上传种子的原始 info 字典计算 SHA-1，使用 `/Home/Episode/<hash>`；
+  重试缓存也必须支持，接口返回空 200 时不能回退到发布组主页。
 - 从 Bangumi 搜索新建番剧模板时，可用蜜柑 `/api/bangumi/search/<keyword>` 自动补 ID；
   必须按返回的 `BangumiUrl` subject id（旧响应才用完整标题）核对，不能盲取第一条。
 - ACG.RIP 联盟发布字段是 `post[post_as_team]=1`，关闭时不发送。
