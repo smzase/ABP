@@ -21,10 +21,10 @@
 
 ## 客户端截图
 
-![发布](assets\发布.webp)
-![番剧模板](assets\番剧模板.webp)
-![标题模板](assets\标题模板.webp)
-![站点账号](assets\站点账号.webp)
+![发布](assets/发布.webp)
+![番剧模板](assets/番剧模板.webp)
+![标题模板](assets/标题模板.webp)
+![站点账号](assets/站点账号.webp)
 
 ## 验证与打包
 
