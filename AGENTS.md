@@ -269,6 +269,10 @@ users see in published titles.
   Node or preload. Its AniBT top-level page may request `clipboard-sanitized-write`
   in both session permission handlers; all other origins, frames and permissions stay
   denied. Copy regression checks use real clicks and verify OS clipboard contents.
+  Probe clipboard snapshots must skip items with no MIME types (an empty Windows
+  clipboard can return one such item); restore empty snapshots with `clipboard.clear()`.
+  Exercise empty and multi-format snapshots before copy checks, and restore the user's
+  original clipboard in `finally`.
   Sidebar children queue their destination in the transient app store, switch to the
   dashboard route, then navigate after the native view is ready. Consume/cancel the
   request so ordinary cache restoration never replays an old child navigation.

@@ -91,6 +91,8 @@ $env:ELECTRON_RUN_AS_NODE=$null; $env:NODE_OPTIONS=""
 - 仪表盘用无 Node/preload 的 WebContentsView 内嵌在主窗口内容区。
   剪贴板仅允许 AniBT 顶层页面的 clipboard-sanitized-write，权限检查和请求均须校验来源与
   主框架；读取、子框架和其他权限继续拒绝。离线探针真实点击复制并核对系统剪贴板内容。
+  探针备份剪贴板须跳过没有 MIME 类型的条目（Windows 空剪贴板也可能返回一个条目），
+  空备份用 clipboard.clear() 恢复；覆盖空剪贴板与多格式备份，并在 finally 恢复原内容。
   侧栏子项先把目标暂存 app store，再进入仪表盘路由，等原生视图就绪后执行并消费请求；
   离开页面取消未处理请求，普通缓存恢复不得重放旧跳转。标题栏右侧依次显示后退、前进、
   刷新图标和“AniBT账号”，页面内不重复显示标题。尺寸跟随页面，离开路由只隐藏并

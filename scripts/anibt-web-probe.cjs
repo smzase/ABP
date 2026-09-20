@@ -10,6 +10,20 @@ let sessionReads = 0
 let groupLoads = 0
 let signInLoads = 0
 
+async function snapshotClipboard() {
+  const items = await clipboard.read()
+  // An empty Windows clipboard can return one item with no types. It cannot be
+  // reconstructed as ClipboardItem({}); represent it with an empty snapshot.
+  return Promise.all(items.filter(item => item.types.length > 0).map(async item => new ClipboardItem(
+    Object.fromEntries(await Promise.all(item.types.map(async type => [type, await item.getType(type)])))
+  )))
+}
+
+async function restoreClipboard(items) {
+  if (items.length) await clipboard.write(items)
+  else clipboard.clear()
+}
+
 const loginHtml = `<!doctype html><html><head><meta name="theme-color" content="#fffbfc"></head><body>
 <form><input name="email" type="email"><input name="password" type="password">
 <cap-widget><button type="button" id="human">我是人类（离线测试）</button></cap-widget>
@@ -241,10 +255,28 @@ async function run({ win, js, check, waitFor, clickElementAt, typeText, nav, san
   if (!view) throw new Error('Embedded dashboard was not attached')
   check('仪表盘复用已登录会话并进入 /groups', view.webContents.getURL() === 'https://anibt.net/groups')
   // Keep the user's clipboard intact and assert the OS content, not just a toast.
-  const savedClipboard = await Promise.all((await clipboard.read()).map(async item => new ClipboardItem(
-    Object.fromEntries(await Promise.all(item.types.map(async type => [type, await item.getType(type)])))
-  )))
+  const savedClipboard = await snapshotClipboard()
   try {
+    // Reproduce the initial clipboard state on a fresh Windows CI runner even
+    // when the developer has copied text before running the probe locally.
+    clipboard.clear()
+    const emptyClipboard = await snapshotClipboard()
+    check('空系统剪贴板可以备份，不构造空 ClipboardItem', emptyClipboard.length === 0)
+    await clipboard.writeText('temporary-clipboard-content')
+    await restoreClipboard(emptyClipboard)
+    check('空剪贴板备份恢复后不残留测试内容', (await clipboard.read()).every(item => item.types.length === 0))
+
+    await clipboard.write([new ClipboardItem({
+      'text/plain': 'clipboard-snapshot-test',
+      'text/html': '<b>clipboard-snapshot-test</b>'
+    })])
+    const formattedClipboard = await snapshotClipboard()
+    await clipboard.writeText('changed-after-snapshot')
+    await restoreClipboard(formattedClipboard)
+    const restoredHtml = (await clipboard.read()).find(item => item.types.includes('text/html'))
+    check('剪贴板备份恢复保留文本和 HTML 格式', await clipboard.readText() === 'clipboard-snapshot-test' &&
+      !!restoredHtml && (await (await restoredHtml.getType('text/html')).text()).includes('<b>clipboard-snapshot-test</b>'))
+
     for (const [id, result, value] of [
       ['copy-link', 'link', 'https://anibt.net/groups/probe-group'],
       ['copy-markdown', 'markdown', '![图片](https://example.invalid/image.png)'],
@@ -267,8 +299,7 @@ async function run({ win, js, check, waitFor, clickElementAt, typeText, nav, san
     check('网页异步复制不再被权限拦截且没有开放剪贴板读取', permissions.writeSucceeded && permissions.readDenied &&
       await clipboard.readText() === 'async-copy', JSON.stringify(permissions))
   } finally {
-    if (savedClipboard.length) await clipboard.write(savedClipboard)
-    else clipboard.clear()
+    await restoreClipboard(savedClipboard)
   }
   check('登录后显示仪表盘四个子项', await waitFor(win, "document.querySelector('[data-probe=image-host]') && document.querySelector('[data-probe=anime_templates]') && document.querySelector('[data-probe=custom_templates]') && document.querySelector('[data-probe=sync]')"))
   await click('[data-probe=image-host]')
