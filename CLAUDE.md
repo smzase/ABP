@@ -192,6 +192,10 @@ $env:ELECTRON_RUN_AS_NODE=$null; $env:NODE_OPTIONS=""
     重新取一次坐标（中间任何重渲染都会让旧坐标指到别处）。
 16. **站点文档在开发机上够得着**：`https://wiki.anibt.net/llms.txt` 是索引，
     每页都有 `.md` 版本（如 `/en/docs/open-api/reference.md`）。对着契约改，别猜。
+17. **本地直发的每个站点都是独立失败边界**。上传仍按站点串行，但任何一个站点的
+    Promise rejection（例如 `net::ERR_CONNECTION_CLOSED`）必须转换为该站失败的
+    `SitePublishResult`，不能让整个 `local:publish` IPC reject；否则其他站点虽然
+    已经发出去了，渲染进程却拿不到结果，也无法保存发布记录和失败重试缓存。
 
 ## 领域约定（改之前先读 AGENTS.md「Domain conventions」）
 

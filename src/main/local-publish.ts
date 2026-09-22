@@ -25,6 +25,7 @@ import { buildMikanRequestBody, mikanEpisodeUrl, parseMikanSearchItems } from '.
 import { dmhyCookieHeader, extractDmhyTopicLink } from '../shared/dmhy.ts'
 import { loadDmhyPublishContext } from './dmhy.ts'
 import { parseTorrent } from '../shared/bencode.ts'
+import { publishSitesSerially } from '../shared/local-publish.ts'
 import {
   acgripPostAsTeamValue,
   normalizeAcgripToken,
@@ -400,18 +401,18 @@ async function publishOne(
         if (temporaryToken) removeTorrent(temporaryToken)
       }
     }
-    if (site === 'mikan') return publishMikan(account, payload, torrent)
+    if (site === 'mikan') return await publishMikan(account, payload, torrent)
     if (site === 'nyaa') {
       const hasNyaaTracker = torrent.meta?.hasNyaaTracker ?? parseTorrent(torrent.bytes).hasNyaaTracker
       if (!hasNyaaTracker) {
         return { site, ok: false, error: 'Nyaa 发布要求种子包含 http://nyaa.tracker.wf:7777/announce' }
       }
-      return publishNyaa(account, payload, torrent)
+      return await publishNyaa(account, payload, torrent)
     }
-    if (site === 'dmhy') return publishDmhy(groupId, account, payload, torrent)
-    if (site === 'acgnxAsia' || site === 'acgnxGlobal') return publishAcgnx(site, account, payload, torrent)
-    if (site === 'bangumiMoe') return publishBangumiMoe(groupId, account, payload, torrent)
-    return publishAcgrip(account, payload, torrent)
+    if (site === 'dmhy') return await publishDmhy(groupId, account, payload, torrent)
+    if (site === 'acgnxAsia' || site === 'acgnxGlobal') return await publishAcgnx(site, account, payload, torrent)
+    if (site === 'bangumiMoe') return await publishBangumiMoe(groupId, account, payload, torrent)
+    return await publishAcgrip(account, payload, torrent)
   } catch (error) {
     return { site, ok: false, error: String(error) }
   }
@@ -423,9 +424,10 @@ export async function publishLocal(payload: LocalPublishPayload, data: AppData):
   const torrent = torrentFor(payload)
   if (!torrent) return { ok: false, sites: [], error: '种子已不在内存或重试缓存中，请重新添加文件' }
   archiveTorrent(payload.recordId, torrent)
-  const results: SitePublishResult[] = []
   // Deliberately serial: public trackers rate-limit uploads and duplicate checks.
-  for (const site of payload.sites) results.push(await publishOne(site, group.id, group.sites[site], payload, torrent))
+  const results = await publishSitesSerially(payload.sites, (site) =>
+    publishOne(site, group.id, group.sites[site], payload, torrent)
+  )
   return { ok: results.length > 0 && results.every((result) => result.ok), sites: results }
 }
 

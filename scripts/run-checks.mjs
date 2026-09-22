@@ -66,6 +66,7 @@ import { toPlain } from '../src/shared/plain.ts'
 import { validatePublishPayload } from '../src/shared/publish-validate.ts'
 import { parsePublishResponse } from '../src/shared/publish-response.ts'
 import { addTorrent, getTorrent, removeTorrent } from '../src/main/torrents.ts'
+import { publishSitesSerially } from '../src/shared/local-publish.ts'
 // 这里确实要真的 Vue：toPlain 防的就是 Vue 的响应式 Proxy 撞上结构化克隆，
 // 拿普通对象冒充测不出任何东西（vue 本来就在 devDependencies 里）。
 import { reactive, ref } from 'vue'
@@ -76,6 +77,27 @@ function ok(name, fn) {
   passed++
   console.log(`  ✓ ${name}`)
 }
+
+async function okAsync(name, fn) {
+  await fn()
+  passed++
+  console.log(`  ✓ ${name}`)
+}
+
+await okAsync('本地发布隔离单站网络异常并保留其他站点结果', async () => {
+  const started = []
+  const results = await publishSitesSerially(['anibt', 'mikan', 'acgrip'], async (site) => {
+    started.push(site)
+    if (site === 'mikan') throw new Error('net::ERR_CONNECTION_CLOSED')
+    return { site, ok: true, url: `https://${site}.test/release` }
+  })
+  assert.deepEqual(started, ['anibt', 'mikan', 'acgrip'])
+  assert.deepEqual(results, [
+    { site: 'anibt', ok: true, url: 'https://anibt.test/release' },
+    { site: 'mikan', ok: false, error: 'Error: net::ERR_CONNECTION_CLOSED' },
+    { site: 'acgrip', ok: true, url: 'https://acgrip.test/release' }
+  ])
+})
 
 console.log('template:')
 ok('version 变量默认/v1 留空，v2+ 正常显示，变量名忽略大小写', () => {

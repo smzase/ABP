@@ -329,6 +329,10 @@ users see in published titles.
 - Failed local records keep a retry-only torrent copy in the config directory under
   `pending-torrents` so individual or multi-selected failed sites can be retried.
   Remove it only after all site results for that record have succeeded.
+- Local site uploads stay serial, but each site is an independent failure boundary.
+  A rejected request such as `net::ERR_CONNECTION_CLOSED` must become that site's failed
+  `SitePublishResult`, never reject the whole `local:publish` IPC call. Preserve all
+  preceding/following successes so the renderer can save one complete retryable record.
 
 ## AniBT API essentials (wiki.anibt.net/docs)
 
